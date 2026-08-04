@@ -35,7 +35,7 @@ tasks:
   dry-run:
     desc: Cross-compile setup-aws locally, without uploading
     cmds:
-      - go tool release --name setup-aws --version 0.0.0-dryrun --dry-run
+      - go tool release --name setup-aws --version v0.0.0-dryrun --dry-run
 
   ci:
     desc: Run everything CI runs (lint + test + dry-run)
