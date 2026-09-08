@@ -3,11 +3,13 @@ package setupaws_test
 import (
 	"context"
 	"fmt"
+	"maps"
 	"os"
-	"os/exec"
 	"testing"
 
+	"github.com/circleci-functions/toolkit/sdk/sdktest"
 	"github.com/circleci-functions/toolkit/testing/compiler"
+	"github.com/circleci-functions/toolkit/testing/runner"
 )
 
 var binaryPath string
@@ -22,8 +24,6 @@ func TestMain(m *testing.M) {
 }
 
 func runTests(m *testing.M) (int, error) {
-	ctx := context.Background()
-
 	p := compiler.NewParallel(1)
 	defer p.Cleanup()
 
@@ -34,17 +34,34 @@ func runTests(m *testing.M) (int, error) {
 		Source: ".",
 	})
 
-	if err := p.Run(ctx); err != nil {
+	if err := p.Run(context.Background()); err != nil {
 		return 0, err
 	}
 
 	return m.Run(), nil
 }
 
-func runWithEnv(t *testing.T, extraEnv []string, args ...string) (string, error) {
+// runFunc runs the compiled binary with extraEnv applied on top of the
+// sandbox's environment, so entries in extraEnv take precedence.
+type runFunc func(t *testing.T, extraEnv map[string]string, args ...string) (string, error)
+
+// sandbox returns a sandbox plus a run function bound to its env. The sandbox
+// points $HOME, $BASH_ENV and the cache at temp locations, so a run never
+// touches the real ones.
+func sandbox(t *testing.T) (*sdktest.Sandbox, runFunc) {
 	t.Helper()
-	cmd := exec.CommandContext(context.Background(), binaryPath, args...)
-	cmd.Env = append(os.Environ(), extraEnv...)
-	out, err := cmd.CombinedOutput()
-	return string(out), err
+	s := sdktest.NewSandbox(t)
+	return s, func(t *testing.T, extraEnv map[string]string, args ...string) (string, error) {
+		t.Helper()
+		r := runner.New(t, binaryPath, runner.WithSandboxEnv(sandboxEnv(s, extraEnv)))
+		_, err := r.Run(args...)
+		return r.StdoutString() + r.StderrString(), err
+	}
+}
+
+// sandboxEnv returns the sandbox's environment with extra applied on top.
+func sandboxEnv(s *sdktest.Sandbox, extra map[string]string) map[string]string {
+	env := s.Env()
+	maps.Copy(env, extra)
+	return env
 }

@@ -15,12 +15,12 @@ import (
 // binary reports version 2.13.0, so passing --version 2.13.0 should skip.
 func TestCLI_Install_SkipWhenAlreadyInstalled(t *testing.T) {
 	stubDir := writeStubAWS(t, "2.13.0")
-	bashEnvFile := filepath.Join(t.TempDir(), "bash_env")
+	_, run := sandbox(t)
 
-	out, err := runWithEnv(t,
-		[]string{"PATH=" + stubDir + ":" + os.Getenv("PATH"), "BASH_ENV=" + bashEnvFile, "AWS_PAGER=disabled"},
-		"--version", "2.13.0",
-	)
+	out, err := run(t, map[string]string{
+		"PATH":      stubDir + string(os.PathListSeparator) + os.Getenv("PATH"),
+		"AWS_PAGER": "disabled",
+	}, "--version", "2.13.0")
 	assert.NilError(t, err, "got: %s", out)
 	assert.Assert(t, strings.Contains(out, "already installed"), "expected skip message, got: %s", out)
 }
@@ -29,15 +29,15 @@ func TestCLI_Install_SkipWhenAlreadyInstalled(t *testing.T) {
 // when the flag is not disabled and AWS_PAGER is not already set.
 func TestCLI_Install_WritesBashEnv(t *testing.T) {
 	stubDir := writeStubAWS(t, "2.13.0")
-	bashEnvFile := filepath.Join(t.TempDir(), "bash_env")
+	s, run := sandbox(t)
 
-	out, err := runWithEnv(t,
-		[]string{"PATH=" + stubDir + ":" + os.Getenv("PATH"), "BASH_ENV=" + bashEnvFile, "AWS_PAGER="},
-		"--version", "2.13.0",
-	)
+	out, err := run(t, map[string]string{
+		"PATH":      stubDir + string(os.PathListSeparator) + os.Getenv("PATH"),
+		"AWS_PAGER": "",
+	}, "--version", "2.13.0")
 	assert.NilError(t, err, "got: %s", out)
 
-	content, readErr := os.ReadFile(bashEnvFile)
+	content, readErr := os.ReadFile(s.BashEnv)
 	assert.NilError(t, readErr)
 	assert.Assert(t, strings.Contains(string(content), "AWS_PAGER"), "expected AWS_PAGER in BASH_ENV, got: %s", content)
 }
