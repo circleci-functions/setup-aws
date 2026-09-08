@@ -1,6 +1,7 @@
-// Command setup-aws installs the AWS CLI v2 and optionally configures AWS
-// credentials (access key or OIDC-based role assumption) in ~/.aws/credentials
-// and ~/.aws/config, and exports environment variables to $BASH_ENV.
+// Command setup-aws installs the AWS CLI v2 and, when --configure-credentials
+// is set, configures AWS credentials (static access key or OIDC-based role
+// assumption) in ~/.aws/credentials and ~/.aws/config, exporting environment
+// variables to $BASH_ENV.
 //
 // Supported platforms: linux, linux/alpine, darwin.
 package main
@@ -21,12 +22,7 @@ import (
 )
 
 type cli struct {
-	Install      installCmd      `cmd:"" default:"withargs" help:"Install the AWS CLI v2."`
-	Setup        setupCmd        `cmd:"" help:"Install and configure AWS credentials."`
-	RoleARNSetup roleARNSetupCmd `cmd:"role-arn-setup" help:"Add a role ARN to an existing named profile."`
-}
-
-type installCmd struct {
+	// install options
 	Version           string `help:"AWS CLI version to install (e.g. 2.13.0, latest)." default:"latest"`
 	OverrideInstalled bool   `name:"override-installed" help:"Force reinstall even if already installed."`
 	EnableAWSPager    bool   `name:"enable-aws-pager" help:"Skip disabling the AWS CLI output pager."`
@@ -35,9 +31,33 @@ type installCmd struct {
 	UseBrew           bool   `name:"use-brew" help:"Install via Homebrew (macOS only)."`
 	// hidden override for tests
 	BaseURL string `name:"base-url" help:"Override download base URL." hidden:""`
+
+	// ConfigureCredentials gates all credential and region configuration below.
+	// When false, setup-aws only installs the AWS CLI.
+	ConfigureCredentials bool `name:"configure-credentials" help:"Configure AWS credentials after installing the CLI."`
+
+	// credential options (used when --configure-credentials is set)
+	ProfileName            string `name:"profile-name" help:"AWS credentials profile to configure." default:"default"`
+	AWSAccessKeyID         string `name:"aws-access-key-id" help:"AWS access key ID." env:"AWS_ACCESS_KEY_ID"`
+	AWSSecretAccessKey     string `name:"aws-secret-access-key" help:"AWS secret access key." env:"AWS_SECRET_ACCESS_KEY"`
+	Region                 string `name:"region" help:"AWS region." env:"AWS_DEFAULT_REGION"`
+	ConfigureDefaultRegion bool   `name:"configure-default-region" help:"Set the default region in ~/.aws/config." default:"true"`
+	ConfigureProfileRegion bool   `name:"configure-profile-region" help:"Set the region for the named profile." default:"true"`
+
+	// OIDC role assumption (used when --configure-credentials is set)
+	RoleARN         string `name:"role-arn" help:"Role ARN to assume via OIDC. Requires role-session-name."`
+	RoleSessionName string `name:"role-session-name" help:"Session name for the assumed role." env:"CIRCLE_JOB"`
+	SessionDuration int    `name:"session-duration" help:"Session duration in seconds." default:"3600"`
+	SetAWSEnvVars   bool   `name:"set-aws-env-vars" help:"Export assumed-role credentials to $BASH_ENV." default:"true"`
+
+	// Profile-based role assumption (used when --configure-credentials is set).
+	// Setting --source-profile selects this mode: rather than assuming the role
+	// via OIDC, --role-arn and --source-profile are written to the named
+	// profile so the AWS CLI assumes the role itself on each call.
+	SourceProfile string `name:"source-profile" help:"Source profile for --role-arn. Setting this writes role_arn/source_profile to the profile instead of assuming the role via OIDC."`
 }
 
-func (c *installCmd) Run(ctx context.Context) error {
+func (c *cli) Run(ctx context.Context) error {
 	if err := awsinstall.Ensure(ctx, awsinstall.EnsureOptions{
 		Version:           c.Version,
 		OverrideInstalled: c.OverrideInstalled,
@@ -54,60 +74,22 @@ func (c *installCmd) Run(ctx context.Context) error {
 			return fmt.Errorf("disable aws pager: %w", err)
 		}
 	}
-	return nil
+
+	if !c.ConfigureCredentials {
+		return nil
+	}
+	return c.configureCredentials(ctx)
 }
 
-type roleARNSetupCmd struct {
-	ProfileName   string `name:"profile-name" help:"Profile to configure." required:""`
-	RoleARN       string `name:"role-arn" help:"Role ARN for the profile." required:""`
-	SourceProfile string `name:"source-profile" help:"Source profile with base credentials." default:"default"`
-}
-
-func (c *roleARNSetupCmd) Run(ctx context.Context) error {
-	return awsconfigure.ConfigureRoleARN(ctx, c.ProfileName, c.RoleARN, c.SourceProfile)
-}
-
-type setupCmd struct {
-	// install options
-	Version           string `help:"AWS CLI version to install." default:"latest"`
-	OverrideInstalled bool   `name:"override-installed" help:"Force reinstall even if already installed."`
-	EnableAWSPager    bool   `name:"enable-aws-pager" help:"Skip disabling the AWS CLI output pager."`
-	InstallDir        string `name:"install-dir" help:"Installation directory for the AWS CLI." default:"/usr/local/aws-cli"`
-	BinaryDir         string `name:"binary-dir" help:"Directory for the aws binary symlink." default:"/usr/local/bin"`
-	UseBrew           bool   `name:"use-brew" help:"Install via Homebrew (macOS only)."`
-	DisableAWSInstall bool   `name:"disable-aws-install" help:"Skip the AWS CLI install step."`
-	BaseURL           string `name:"base-url" help:"Override download base URL." hidden:""`
-	// credential options
-	ProfileName            string `name:"profile-name" help:"AWS credentials profile to configure." default:"default"`
-	AWSAccessKeyID         string `name:"aws-access-key-id" help:"AWS access key ID." env:"AWS_ACCESS_KEY_ID"`
-	AWSSecretAccessKey     string `name:"aws-secret-access-key" help:"AWS secret access key." env:"AWS_SECRET_ACCESS_KEY"`
-	Region                 string `name:"region" help:"AWS region." env:"AWS_DEFAULT_REGION"`
-	ConfigureDefaultRegion bool   `name:"configure-default-region" help:"Set the default region in ~/.aws/config." default:"true"`
-	ConfigureProfileRegion bool   `name:"configure-profile-region" help:"Set the region for the named profile." default:"true"`
-	// OIDC role assumption
-	RoleARN         string `name:"role-arn" help:"Role ARN to assume via OIDC. Requires role-session-name."`
-	RoleSessionName string `name:"role-session-name" help:"Session name for the assumed role." env:"CIRCLE_JOB"`
-	SessionDuration int    `name:"session-duration" help:"Session duration in seconds." default:"3600"`
-	SetAWSEnvVars   bool   `name:"set-aws-env-vars" help:"Export assumed-role credentials to $BASH_ENV." default:"true"`
-}
-
-func (c *setupCmd) Run(ctx context.Context) error {
-	if !c.DisableAWSInstall {
-		if err := awsinstall.Ensure(ctx, awsinstall.EnsureOptions{
-			Version:           c.Version,
-			OverrideInstalled: c.OverrideInstalled,
-			InstallDir:        c.InstallDir,
-			BinaryDir:         c.BinaryDir,
-			UseBrew:           c.UseBrew,
-			BaseURL:           c.BaseURL,
-		}); err != nil {
-			return err
+func (c *cli) configureCredentials(ctx context.Context) error {
+	// Profile-based role assumption: write role_arn/source_profile to the named
+	// profile so the AWS CLI assumes the role itself, rather than assuming it
+	// here via OIDC.
+	if c.SourceProfile != "" {
+		if c.RoleARN == "" {
+			return fmt.Errorf("--role-arn is required when --source-profile is set")
 		}
-		if !c.EnableAWSPager && os.Getenv("AWS_PAGER") == "" {
-			if err := disableAWSPager(); err != nil {
-				return fmt.Errorf("disable aws pager: %w", err)
-			}
-		}
+		return awsconfigure.ConfigureRoleARN(ctx, c.ProfileName, c.RoleARN, c.SourceProfile)
 	}
 
 	// Resolve the credentials to use for configuration. Static key/secret are
@@ -145,7 +127,7 @@ func (c *setupCmd) Run(ctx context.Context) error {
 	})
 }
 
-func (c *setupCmd) assumeRole(ctx context.Context) (awsoidc.Credentials, error) {
+func (c *cli) assumeRole(ctx context.Context) (awsoidc.Credentials, error) {
 	orgID := os.Getenv("CIRCLE_ORGANIZATION_ID")
 	token, err := awsoidc.GetOIDCToken(ctx, orgID)
 	if err != nil {
@@ -205,7 +187,7 @@ func run(ctx context.Context, _ *sdk.Client) error {
 	var flags cli
 	kCtx := kong.Parse(&flags,
 		kong.Name("setup-aws"),
-		kong.Description("Install the AWS CLI v2 and configure AWS credentials.\n\nExample:\n  circleci run setup-aws@<version> -- --version 2.13.0"),
+		kong.Description("Install the AWS CLI v2 and optionally configure AWS credentials.\n\nExample:\n  circleci run setup-aws@<version> -- --version 2.13.0"),
 		kong.UsageOnError(),
 		functionyaml.Embed(),
 	)

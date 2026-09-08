@@ -19,7 +19,7 @@ func TestCLI_Install_SkipWhenAlreadyInstalled(t *testing.T) {
 
 	out, err := runWithEnv(t,
 		[]string{"PATH=" + stubDir + ":" + os.Getenv("PATH"), "BASH_ENV=" + bashEnvFile, "AWS_PAGER=disabled"},
-		"install", "--version", "2.13.0",
+		"--version", "2.13.0",
 	)
 	assert.NilError(t, err, "got: %s", out)
 	assert.Assert(t, strings.Contains(out, "already installed"), "expected skip message, got: %s", out)
@@ -33,7 +33,7 @@ func TestCLI_Install_WritesBashEnv(t *testing.T) {
 
 	out, err := runWithEnv(t,
 		[]string{"PATH=" + stubDir + ":" + os.Getenv("PATH"), "BASH_ENV=" + bashEnvFile, "AWS_PAGER="},
-		"install", "--version", "2.13.0",
+		"--version", "2.13.0",
 	)
 	assert.NilError(t, err, "got: %s", out)
 
