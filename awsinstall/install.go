@@ -15,6 +15,7 @@ import (
 	"github.com/circleci-functions/toolkit/download"
 
 	"github.com/circleci-functions/toolkit/archive"
+	"github.com/circleci-functions/toolkit/pathlink"
 )
 
 // DefaultBaseURL is the base download URL for AWS CLI installers.
@@ -105,11 +106,57 @@ func Ensure(ctx context.Context, opts EnsureOptions) error {
 
 	if IsInstalled(opts.Version) && !opts.OverrideInstalled {
 		fmt.Fprintln(os.Stderr, "setup-aws: AWS CLI already installed, skipping")
-		return nil
+	} else {
+		fmt.Fprintf(os.Stderr, "setup-aws: installing AWS CLI %s\n", opts.Version)
+		if err := installForPlatform(ctx, p, opts); err != nil {
+			return err
+		}
 	}
 
-	fmt.Fprintf(os.Stderr, "setup-aws: installing AWS CLI %s\n", opts.Version)
-	return installForPlatform(ctx, p, opts)
+	return linkAWS()
+}
+
+// linkAWS makes the installed aws binary resolvable by name for the rest of the
+// job, by linking it into a directory already on PATH. A link, not a $BASH_ENV
+// PATH prepend: it carries into any shell and into steps that source nothing.
+// Returns nil when aws is not on PATH, since the install step above reports a
+// missing binary better than a failure to link would.
+func linkAWS() error {
+	return linkAWSInto("", "")
+}
+
+// linkAWSInto links the aws binary into a directory on PATH. dir links into
+// exactly that directory and skips discovery, and path replaces the search
+// path; tests set both so they cannot write to the real PATH.
+func linkAWSInto(dir, path string) error {
+	aws, err := exec.LookPath("aws")
+	if err != nil {
+		return nil
+	}
+	if _, err := pathlink.Ensure(pathlink.Options{
+		Names:     []string{"aws"},
+		FromDir:   filepath.Dir(aws),
+		Preferred: pathlink.UserBinDirs(),
+		Dir:       dir,
+		Path:      path,
+		Verify:    verifyAWS,
+	}); err != nil {
+		return fmt.Errorf("link aws onto PATH: %w", err)
+	}
+	return nil
+}
+
+// verifyAWS asks the resolved binary to identify itself, catching a link that
+// resolves to something other than the AWS CLI.
+func verifyAWS(bin string) error {
+	out, err := pathlink.Command(bin, "--version").CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("could not report its version: %w", err)
+	}
+	if !strings.Contains(string(out), "aws-cli") {
+		return fmt.Errorf("reports %q, not an aws-cli version", strings.TrimSpace(string(out)))
+	}
+	return nil
 }
 
 func installForPlatform(ctx context.Context, p platform, opts EnsureOptions) error {

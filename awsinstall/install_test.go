@@ -69,21 +69,46 @@ func TestIsInstalled_NotOnPath(t *testing.T) {
 }
 
 func TestIsInstalled_AnyVersion(t *testing.T) {
-	stubDir := writeStubAWS(t, "2.13.0")
+	stubDir := writeStubAWS(t)
 	t.Setenv("PATH", stubDir)
 	assert.Assert(t, IsInstalled("latest"))
 }
 
 func TestIsInstalled_ExactMatch(t *testing.T) {
-	stubDir := writeStubAWS(t, "2.13.0")
+	stubDir := writeStubAWS(t)
 	t.Setenv("PATH", stubDir)
-	assert.Assert(t, IsInstalled("2.13.0"))
+	assert.Assert(t, IsInstalled(stubVersion))
 }
 
 func TestIsInstalled_NoMatch(t *testing.T) {
-	stubDir := writeStubAWS(t, "2.13.0")
+	stubDir := writeStubAWS(t)
 	t.Setenv("PATH", stubDir)
 	assert.Assert(t, !IsInstalled("2.14.0"))
+}
+
+// TestLinkAWS verifies the aws binary is symlinked into a directory on PATH, so
+// later steps resolve it in any shell. A link into a temp directory via the
+// linkAWSInto seam, so the test never writes to the real PATH.
+func TestLinkAWS(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the aws stub is a shell script, not executable on Windows")
+	}
+	fromDir := writeStubAWS(t)
+	t.Setenv("PATH", fromDir)
+	linkDir := t.TempDir()
+
+	assert.NilError(t, linkAWSInto(linkDir, fromDir))
+
+	target, err := os.Readlink(filepath.Join(linkDir, "aws"))
+	assert.NilError(t, err)
+	assert.Equal(t, target, filepath.Join(fromDir, "aws"))
+}
+
+// TestLinkAWS_NotOnPath verifies linking is a no-op, not an error, when no aws
+// is resolvable: the install step reports a missing binary better.
+func TestLinkAWS_NotOnPath(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	assert.NilError(t, linkAWSInto("", ""))
 }
 
 // writeOSRelease writes content to a temp file and returns its path.
@@ -94,12 +119,15 @@ func writeOSRelease(t *testing.T, content string) string {
 	return f
 }
 
-// writeStubAWS writes a stub aws script that reports the given version and
-// returns the directory containing it.
-func writeStubAWS(t *testing.T, version string) string {
+// stubVersion is the version the aws stub reports.
+const stubVersion = "2.13.0"
+
+// writeStubAWS writes a stub aws script that reports stubVersion and returns
+// the directory containing it.
+func writeStubAWS(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	script := fmt.Sprintf("#!/bin/sh\necho 'aws-cli/%s Python/3.11 Linux/x86_64'\n", version)
+	script := fmt.Sprintf("#!/bin/sh\necho 'aws-cli/%s Python/3.11 Linux/x86_64'\n", stubVersion)
 	assert.NilError(t, os.WriteFile(filepath.Join(dir, "aws"), []byte(script), 0750))
 	return dir
 }
