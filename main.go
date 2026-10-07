@@ -23,7 +23,7 @@ import (
 
 type cli struct {
 	// install options
-	Version           string `help:"AWS CLI version to install (e.g. 2.13.0, latest)." default:"latest"`
+	Version           string `help:"AWS CLI version to install (e.g. 2.13.0, latest)." default:"latest" example:"2.13.0"`
 	OverrideInstalled bool   `name:"override-installed" help:"Force reinstall even if already installed."`
 	EnableAWSPager    bool   `name:"enable-aws-pager" help:"Skip disabling the AWS CLI output pager."`
 	InstallDir        string `name:"install-dir" help:"Installation directory for the AWS CLI." default:"/usr/local/aws-cli"`
@@ -187,7 +187,7 @@ func run(ctx context.Context, _ *sdk.Client) error {
 	var flags cli
 	kCtx := kong.Parse(&flags,
 		kong.Name("setup-aws"),
-		kong.Description("Install the AWS CLI v2 and optionally configure AWS credentials.\n\nExample:\n  circleci run setup-aws@<version> -- --version 2.13.0"),
+		kong.Description("Install the AWS CLI v2 and optionally configure AWS credentials."),
 		kong.UsageOnError(),
 		functionyaml.Embed(),
 	)
