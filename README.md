@@ -29,6 +29,13 @@ block waiting for pager input. Pass `--enable-aws-pager` to opt out.
 On macOS you can install through Homebrew instead of the official installer with
 `--use-brew`.
 
+The official installers are verified before they run. On Linux, the zip's PGP
+signature must match the AWS CLI team key published in the
+[AWS CLI install guide](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html).
+On macOS, `pkgutil --check-signature` must show the package signed by Amazon's
+Apple Developer ID. Alpine (`apk`) and `--use-brew` installs are left to the
+package manager.
+
 ## Configuring credentials
 
 Add `--configure-credentials` to configure AWS credentials after installing.

@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"gotest.tools/v3/assert"
@@ -99,11 +100,9 @@ func TestInstallLinux_IgnoresInstallerPlantedInTempDir(t *testing.T) {
 	assert.NilError(t, os.WriteFile(planted, []byte("planted"), 0600))
 
 	marker := filepath.Join(t.TempDir(), "installed")
-	installer := fmt.Sprintf("#!/bin/sh\necho \"$@\" > %s\n", marker)
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write(zipWith(t, "aws/install", installer))
-	}))
-	defer srv.Close()
+	installer := zipWith(t, "aws/install", fmt.Sprintf("#!/bin/sh\necho \"$@\" > %s\n", marker))
+	key := useTestSigningKey(t)
+	srv := serveInstaller(t, installer, detachSign(t, key, installer))
 	t.Setenv("PATH", writeStubSudo(t)+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	err := installLinux(context.Background(), EnsureOptions{
@@ -122,6 +121,52 @@ func TestInstallLinux_IgnoresInstallerPlantedInTempDir(t *testing.T) {
 	assert.NilError(t, err)
 	assert.Equal(t, len(entries), 1, "the run's temp dir should be removed")
 	assert.Equal(t, entries[0].Name(), filepath.Base(planted))
+}
+
+func TestInstallLinux_RejectsBadSignature(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	marker := filepath.Join(t.TempDir(), "installed")
+	installer := zipWith(t, "aws/install", fmt.Sprintf("#!/bin/sh\ntouch %s\n", marker))
+	key := useTestSigningKey(t)
+	srv := serveInstaller(t, installer, detachSign(t, key, []byte("something else")))
+	t.Setenv("PATH", writeStubSudo(t)+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	err := installLinux(context.Background(), EnsureOptions{Version: "latest", BaseURL: srv.URL})
+	assert.ErrorContains(t, err, "against the AWS CLI signing key")
+
+	_, statErr := os.Stat(marker)
+	assert.Assert(t, os.IsNotExist(statErr), "the installer should not run")
+}
+
+func TestInstallDarwin_RejectsUnsignedPackage(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	srv := serveInstaller(t, []byte("pkg"), nil)
+	dir := writeStubPkgutil(t, "Package \"AWSCLIV2.pkg\":\n   Status: no signature", 1)
+	marker := filepath.Join(t.TempDir(), "installed")
+	installer := fmt.Sprintf("#!/bin/sh\ntouch %s\n", marker)
+	assert.NilError(t, os.WriteFile(filepath.Join(dir, "installer"), []byte(installer), 0750))
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+writeStubSudo(t)+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	err := installDarwin(context.Background(), EnsureOptions{Version: "latest", BaseURL: srv.URL})
+	assert.ErrorContains(t, err, "Status: no signature")
+
+	_, statErr := os.Stat(marker)
+	assert.Assert(t, os.IsNotExist(statErr), "the installer should not run")
+}
+
+// serveInstaller serves sig for paths ending in .sig and installer for
+// everything else.
+func serveInstaller(t *testing.T, installer, sig []byte) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, ".sig") {
+			_, _ = w.Write(sig)
+			return
+		}
+		_, _ = w.Write(installer)
+	}))
+	t.Cleanup(srv.Close)
+	return srv
 }
 
 // zipWith returns a zip archive holding one executable file.
