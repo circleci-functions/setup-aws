@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/alecthomas/kong"
@@ -148,29 +149,47 @@ func (c *cli) assumeRole(ctx context.Context) (awsoidc.Credentials, error) {
 }
 
 // exportCredsToEnv writes temporary AWS credentials to $BASH_ENV so subsequent
-// steps can use them without re-assuming the role.
+// steps can use them without re-assuming the role. It fails when $BASH_ENV is
+// unset, as setup-github-cli does for its token, since later steps would
+// silently run without the credentials.
 func exportCredsToEnv(creds awsoidc.Credentials) error {
-	return appendToBashEnv(fmt.Sprintf(
+	bashEnv := os.Getenv("BASH_ENV")
+	if bashEnv == "" {
+		return fmt.Errorf("BASH_ENV must be set to export the assumed-role credentials (pass --set-aws-env-vars=false to skip)")
+	}
+	return appendToBashEnv(bashEnv, fmt.Sprintf(
 		"export AWS_ACCESS_KEY_ID=%s\nexport AWS_SECRET_ACCESS_KEY=%s\nexport AWS_SESSION_TOKEN=%s\n",
 		shellQuote(creds.AccessKeyID), shellQuote(creds.SecretAccessKey), shellQuote(creds.SessionToken),
 	))
 }
 
-// disableAWSPager writes export AWS_PAGER="" to $BASH_ENV so subsequent steps
-// don't get paged output.
-func disableAWSPager() error {
-	return appendToBashEnv("export AWS_PAGER=\"\"\n")
-}
+const pagerExport = `export AWS_PAGER=""`
 
-// appendToBashEnv appends content to $BASH_ENV, doing nothing when it's unset.
-// The file can hold credentials and is private to the job, so it's created at
-// mode 0600, and an existing file this user owns is tightened to 0600.
-func appendToBashEnv(content string) error {
+// disableAWSPager writes export AWS_PAGER="" to $BASH_ENV so subsequent steps
+// don't get paged output. It writes the line once however many times it runs,
+// and only warns when $BASH_ENV is unset, since a pager is an inconvenience
+// rather than a failure.
+func disableAWSPager() error {
 	bashEnv := os.Getenv("BASH_ENV")
 	if bashEnv == "" {
+		fmt.Fprintln(os.Stderr, "setup-aws: warning: BASH_ENV is not set, so the AWS CLI pager stays on in later steps")
 		return nil
 	}
-	f, err := os.OpenFile(bashEnv, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600) //nolint:gosec
+	content, err := os.ReadFile(bashEnv) //nolint:gosec
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	if slices.Contains(strings.Split(string(content), "\n"), pagerExport) {
+		return nil
+	}
+	return appendToBashEnv(bashEnv, pagerExport+"\n")
+}
+
+// appendToBashEnv appends content to the $BASH_ENV file at path. The file can
+// hold credentials and is private to the job, so it's created at mode 0600,
+// and an existing file this user owns is tightened to 0600.
+func appendToBashEnv(path, content string) error {
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600) //nolint:gosec
 	if err != nil {
 		return err
 	}

@@ -62,3 +62,27 @@ func TestAppendToBashEnv_TightensExistingFile(t *testing.T) {
 	assert.NilError(t, err)
 	assert.Equal(t, string(content), "export FOO=bar\nexport AWS_ACCESS_KEY_ID='a'\nexport AWS_SECRET_ACCESS_KEY='b'\nexport AWS_SESSION_TOKEN='c'\n")
 }
+
+func TestDisableAWSPager_WritesTheLineOnce(t *testing.T) {
+	bashEnv := filepath.Join(t.TempDir(), "bash_env")
+	t.Setenv("BASH_ENV", bashEnv)
+
+	for range 3 {
+		assert.NilError(t, disableAWSPager())
+	}
+
+	content, err := os.ReadFile(bashEnv)
+	assert.NilError(t, err)
+	assert.Equal(t, string(content), "export AWS_PAGER=\"\"\n")
+}
+
+func TestDisableAWSPager_BashEnvUnset(t *testing.T) {
+	t.Setenv("BASH_ENV", "")
+	assert.NilError(t, disableAWSPager())
+}
+
+func TestExportCredsToEnv_BashEnvUnset(t *testing.T) {
+	t.Setenv("BASH_ENV", "")
+	err := exportCredsToEnv(awsoidc.Credentials{AccessKeyID: "a", SecretAccessKey: "b", SessionToken: "c"})
+	assert.Error(t, err, "BASH_ENV must be set to export the assumed-role credentials (pass --set-aws-env-vars=false to skip)")
+}
