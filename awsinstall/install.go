@@ -46,17 +46,29 @@ func detectPlatform(osReleaseFile string) platform {
 }
 
 // IsInstalled reports whether the AWS CLI is installed. With version "latest",
-// any installed version satisfies the check; otherwise the aws --version output
-// must contain version.
+// any installed v2 satisfies the check, so a v1 gets replaced rather than
+// accepted; otherwise the aws --version output must contain version.
 func IsInstalled(version string) bool {
 	out, err := exec.Command("aws", "--version").Output() //nolint:gosec
 	if err != nil {
 		return false
 	}
 	if version == "latest" {
-		return true
+		installed, ok := installedVersion(string(out))
+		return ok && strings.HasPrefix(installed, "2.")
 	}
 	return strings.Contains(string(out), version)
+}
+
+// installedVersion returns the version in the "aws-cli/X.Y.Z" token of
+// `aws --version` output, which also names the Python, OS and botocore versions.
+func installedVersion(out string) (string, bool) {
+	for _, field := range strings.Fields(out) {
+		if v, ok := strings.CutPrefix(field, "aws-cli/"); ok {
+			return v, true
+		}
+	}
+	return "", false
 }
 
 func buildLinuxURL(baseURL, version, arch string) string {
