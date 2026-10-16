@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	stypes "github.com/aws/aws-sdk-go-v2/service/sts/types"
@@ -45,8 +46,20 @@ func TestGetOIDCToken_Success(t *testing.T) {
 
 func TestGetOIDCToken_MissingBinary(t *testing.T) {
 	t.Setenv("PATH", t.TempDir()) // empty dir — circleci not found
+	start := time.Now()
 	_, err := GetOIDCToken(context.Background(), "org-uuid-123")
-	assert.Assert(t, err != nil, "expected error when circleci not on PATH")
+	assert.ErrorContains(t, err, "the circleci CLI is needed to mint the token and isn't on PATH")
+	assert.Assert(t, time.Since(start) < time.Second, "a missing CLI should not be retried")
+}
+
+func TestGetOIDCToken_IncludesStderr(t *testing.T) {
+	dir := t.TempDir()
+	script := "#!/bin/sh\necho 'Error: OIDC tokens are only available inside a job' >&2\nexit 1\n"
+	assert.NilError(t, os.WriteFile(filepath.Join(dir, "circleci"), []byte(script), 0750))
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+
+	_, err := GetOIDCToken(context.Background(), "org-uuid-123")
+	assert.Error(t, err, "get OIDC token after 3 attempts: exit status 1: Error: OIDC tokens are only available inside a job")
 }
 
 func TestAssumeRole_Success(t *testing.T) {
