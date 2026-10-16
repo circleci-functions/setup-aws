@@ -3,12 +3,33 @@
 Installs the AWS CLI v2 for the rest of the job, and — when you ask it to —
 configures AWS credentials in `~/.aws/credentials` and `~/.aws/config`.
 
+Declare the function in a top-level `functions:` block, then call it as a step.
+Each flag in the [table below](#flags) is a `with:` key, written without its
+leading `--`:
+
 ```yaml
-steps:
-  - run:
-      name: Install AWS CLI
-      command: circleci run setup-aws@<version> -- --version 2.13.0
-  - run: aws --version
+functions:
+  setup-aws: github.com/circleci-functions/setup-aws@<version>
+
+jobs:
+  deploy:
+    docker:
+      - image: cimg/base:current
+    steps:
+      - setup-aws:
+          with:
+            version: 2.13.0
+      - run: aws --version
+```
+
+`circleci function add setup-aws` writes the `functions:` entry for you.
+
+Where the `functions:` block isn't enabled, such as on CircleCI Server, run it
+with `circleci run` and the function's full name. Everything after `--` is
+passed to the function:
+
+```yaml
+      - run: circleci run github.com/circleci-functions/setup-aws@<version> -- --version 2.13.0
 ```
 
 Later steps pick up `aws` automatically. The install is skipped when the
@@ -23,7 +44,9 @@ block waiting for pager input. Pass `--enable-aws-pager` to opt out.
 `--version` takes an exact AWS CLI v2 version or `latest`:
 
 ```yaml
-- run: circleci run setup-aws@<version> -- --version 2.13.0
+      - setup-aws:
+          with:
+            version: 2.13.0
 ```
 
 On macOS you can install through Homebrew instead of the official installer with
@@ -40,9 +63,10 @@ By default the access key and secret are read from `$AWS_ACCESS_KEY_ID` and
 `$AWS_SECRET_ACCESS_KEY`, and the region from `$AWS_DEFAULT_REGION`:
 
 ```yaml
-- run:
-    name: Set up AWS
-    command: circleci run setup-aws@<version> -- --configure-credentials --region us-east-1
+      - setup-aws:
+          with:
+            configure-credentials: true
+            region: us-east-1
 ```
 
 ### OIDC role assumption
@@ -53,13 +77,11 @@ credentials are also exported to `$BASH_ENV` (turn that off with
 `--set-aws-env-vars=false`):
 
 ```yaml
-- run:
-    name: Assume role via OIDC
-    command: >-
-      circleci run setup-aws@<version> --
-      --configure-credentials
-      --role-arn arn:aws:iam::123456789012:role/Deploy
-      --region us-east-1
+      - setup-aws:
+          with:
+            configure-credentials: true
+            role-arn: arn:aws:iam::123456789012:role/Deploy
+            region: us-east-1
 ```
 
 `--role-session-name` defaults to `$CIRCLE_JOB`.
@@ -71,14 +93,12 @@ profile instead of assuming the role here. The AWS CLI then assumes the role
 itself, using the source profile's base credentials, on each call:
 
 ```yaml
-- run:
-    name: Configure deploy profile
-    command: >-
-      circleci run setup-aws@<version> --
-      --configure-credentials
-      --profile-name deploy
-      --role-arn arn:aws:iam::123456789012:role/Deploy
-      --source-profile default
+      - setup-aws:
+          with:
+            configure-credentials: true
+            profile-name: deploy
+            role-arn: arn:aws:iam::123456789012:role/Deploy
+            source-profile: default
 ```
 
 ## Flags
