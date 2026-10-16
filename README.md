@@ -45,6 +45,9 @@ By default the access key and secret are read from `$AWS_ACCESS_KEY_ID` and
     command: circleci run setup-aws@<version> -- --configure-credentials --region us-east-1
 ```
 
+Static keys are only written to `~/.aws/credentials`. Unlike assumed-role
+credentials, they aren't exported to `$BASH_ENV`.
+
 ### OIDC role assumption
 
 Set `--role-arn` to mint a CircleCI OIDC token and call
@@ -61,6 +64,14 @@ credentials are also exported to `$BASH_ENV` (turn that off with
       --role-arn arn:aws:iam::123456789012:role/Deploy
       --region us-east-1
 ```
+
+Before this works, AWS needs to trust CircleCI's tokens. Create an IAM OIDC
+identity provider for `https://oidc.circleci.com/org/<organization-id>` with
+your organization ID as the audience, and give the role a trust policy that
+lets that provider call `sts:AssumeRoleWithWebIdentity`. setup-aws mints the
+token with the `circleci` CLI, which every job has, and uses
+`$CIRCLE_ORGANIZATION_ID` as the audience. See
+[Using OpenID Connect tokens in jobs](https://circleci.com/docs/guides/permissions-authentication/openid-connect-tokens/).
 
 `--role-session-name` defaults to `$CIRCLE_JOB`.
 
@@ -81,16 +92,20 @@ itself, using the source profile's base credentials, on each call:
       --source-profile default
 ```
 
+setup-aws doesn't create the source profile. It must already hold
+credentials, for example from an earlier setup-aws step that configured static
+keys.
+
 ## Flags
 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--version` | `latest` | AWS CLI version to install (e.g. `2.13.0`, `latest`) |
 | `--override-installed` | false | Force reinstall even if already installed |
-| `--enable-aws-pager` | false | Skip disabling the AWS CLI output pager |
-| `--install-dir` | `/usr/local/aws-cli` | Installation directory |
-| `--binary-dir` | `/usr/local/bin` | Directory for the `aws` symlink |
-| `--use-brew` | false | Install via Homebrew (macOS only) |
+| `--enable-aws-pager` | false | Leave the AWS CLI output pager on instead of disabling it |
+| `--install-dir` | `/usr/local/aws-cli` | Installation directory. Linux installer only; the macOS package always installs here |
+| `--binary-dir` | `/usr/local/bin` | Directory for the `aws` symlink. Linux installer only; the macOS package always links here |
+| `--use-brew` | false | Install via Homebrew (macOS only). Homebrew installs its current version and ignores `--version` |
 | `--configure-credentials` | false | Configure credentials after installing |
 | `--profile-name` | `default` | AWS credentials profile to configure |
 | `--aws-access-key-id` | `$AWS_ACCESS_KEY_ID` | AWS access key ID |
