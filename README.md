@@ -15,8 +15,9 @@ Later steps pick up `aws` automatically. The install is skipped when the
 requested version is already present (pass `--override-installed` to force a
 reinstall).
 
-By default `AWS_PAGER=""` is appended to `$BASH_ENV` so AWS CLI commands never
-block waiting for pager input. Pass `--enable-aws-pager` to opt out.
+By default `AWS_PAGER=""` is appended to `$BASH_ENV`, once per job, so AWS CLI
+commands never block waiting for pager input. Pass `--enable-aws-pager` to opt
+out. If `$BASH_ENV` isn't set, setup-aws warns and leaves the pager on.
 
 ## Choosing a version
 
@@ -62,7 +63,8 @@ By default the access key and secret are read from `$AWS_ACCESS_KEY_ID` and
 Set `--role-arn` to mint a CircleCI OIDC token and call
 `sts:AssumeRoleWithWebIdentity` for temporary credentials. The assumed-role
 credentials are also exported to `$BASH_ENV` (turn that off with
-`--set-aws-env-vars=false`):
+`--set-aws-env-vars=false`). setup-aws fails if `$BASH_ENV` isn't set, rather
+than leaving later steps without them:
 
 ```yaml
 - run:
