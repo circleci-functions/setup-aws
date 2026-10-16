@@ -202,14 +202,35 @@ func installDarwinBrew(ctx context.Context, override bool) error {
 	return nil
 }
 
-// runWithSudo runs args as the current user; prepends sudo when not root.
-func runWithSudo(ctx context.Context, dir string, args ...string) error {
-	var cmd *exec.Cmd
-	if os.Geteuid() != 0 {
-		cmd = exec.CommandContext(ctx, "sudo", args...) //nolint:gosec
-	} else {
-		cmd = exec.CommandContext(ctx, args[0], args[1:]...) //nolint:gosec
+// checkSudo fails with a clear message when sudo is missing or wants a
+// password, before the install starts.
+func checkSudo(ctx context.Context) error {
+	const msg = "installing the AWS CLI needs root or passwordless sudo"
+	if _, err := exec.LookPath("sudo"); err != nil {
+		return fmt.Errorf("%s, and sudo is not installed", msg)
 	}
+	out, err := exec.CommandContext(ctx, "sudo", "-n", "true").CombinedOutput()
+	if err != nil {
+		if detail := strings.TrimSpace(string(out)); detail != "" {
+			return fmt.Errorf("%s: %s", msg, detail)
+		}
+		return fmt.Errorf("%s: sudo -n: %w", msg, err)
+	}
+	return nil
+}
+
+// runWithSudo runs args as root: directly when already root, otherwise through
+// non-interactive sudo, since a CI step has no terminal to answer a password
+// prompt and would hang instead.
+func runWithSudo(ctx context.Context, dir string, args ...string) error {
+	name, cmdArgs := args[0], args[1:]
+	if os.Geteuid() != 0 {
+		if err := checkSudo(ctx); err != nil {
+			return err
+		}
+		name, cmdArgs = "sudo", append([]string{"-n"}, args...)
+	}
+	cmd := exec.CommandContext(ctx, name, cmdArgs...) //nolint:gosec
 	cmd.Dir = dir
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr

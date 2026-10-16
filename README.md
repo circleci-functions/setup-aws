@@ -109,3 +109,7 @@ Credential flags apply only when `--configure-credentials` is set.
 ## Platform support
 
 Linux (amd64, arm64), Alpine Linux, and macOS. Windows is not yet supported.
+
+On Linux and macOS the official installer runs as root. When the step isn't
+already root, setup-aws uses `sudo -n` and fails if sudo is missing or asks for
+a password. `--use-brew` on macOS doesn't need root.
