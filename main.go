@@ -8,8 +8,11 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
+	"strings"
 
 	"github.com/alecthomas/kong"
 
@@ -147,36 +150,44 @@ func (c *cli) assumeRole(ctx context.Context) (awsoidc.Credentials, error) {
 // exportCredsToEnv writes temporary AWS credentials to $BASH_ENV so subsequent
 // steps can use them without re-assuming the role.
 func exportCredsToEnv(creds awsoidc.Credentials) error {
-	bashEnv := os.Getenv("BASH_ENV")
-	if bashEnv == "" {
-		return nil
-	}
-	f, err := os.OpenFile(bashEnv, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o666) //nolint:gosec
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	_, err = fmt.Fprintf(f,
-		"export AWS_ACCESS_KEY_ID=%q\nexport AWS_SECRET_ACCESS_KEY=%q\nexport AWS_SESSION_TOKEN=%q\n",
-		creds.AccessKeyID, creds.SecretAccessKey, creds.SessionToken,
-	)
-	return err
+	return appendToBashEnv(fmt.Sprintf(
+		"export AWS_ACCESS_KEY_ID=%s\nexport AWS_SECRET_ACCESS_KEY=%s\nexport AWS_SESSION_TOKEN=%s\n",
+		shellQuote(creds.AccessKeyID), shellQuote(creds.SecretAccessKey), shellQuote(creds.SessionToken),
+	))
 }
 
 // disableAWSPager writes export AWS_PAGER="" to $BASH_ENV so subsequent steps
 // don't get paged output.
 func disableAWSPager() error {
+	return appendToBashEnv("export AWS_PAGER=\"\"\n")
+}
+
+// appendToBashEnv appends content to $BASH_ENV, doing nothing when it's unset.
+// The file can hold credentials and is private to the job, so it's created at
+// mode 0600, and an existing file this user owns is tightened to 0600.
+func appendToBashEnv(content string) error {
 	bashEnv := os.Getenv("BASH_ENV")
 	if bashEnv == "" {
 		return nil
 	}
-	f, err := os.OpenFile(bashEnv, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o666) //nolint:gosec
+	f, err := os.OpenFile(bashEnv, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600) //nolint:gosec
 	if err != nil {
 		return err
 	}
 	defer f.Close()
-	_, err = fmt.Fprintln(f, `export AWS_PAGER=""`)
-	return err
+	if err := f.Chmod(0o600); err != nil && !errors.Is(err, fs.ErrPermission) {
+		return err
+	}
+	if _, err := f.WriteString(content); err != nil {
+		return err
+	}
+	return f.Close()
+}
+
+// shellQuote single-quotes s for bash, so nothing in it is expanded when
+// $BASH_ENV is sourced.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 func main() {

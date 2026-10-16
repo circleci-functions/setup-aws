@@ -76,6 +76,11 @@ credentials are also exported to `$BASH_ENV` (turn that off with
 
 `--role-session-name` defaults to `$CIRCLE_JOB`.
 
+The exported credentials are plain text in `$BASH_ENV`, which setup-aws keeps
+at mode 0600. CircleCI only masks project and context secrets, not values
+minted during the job, so a later `env` or `set -x` prints them. Pass
+`--set-aws-env-vars=false` if later steps only need `~/.aws/credentials`.
+
 ### Profile-based role assumption
 
 Set `--source-profile` to write `role_arn` and `source_profile` into the named
