@@ -37,7 +37,9 @@ Without it, setup-aws only installs the CLI.
 ### Static access keys
 
 By default the access key and secret are read from `$AWS_ACCESS_KEY_ID` and
-`$AWS_SECRET_ACCESS_KEY`, and the region from `$AWS_DEFAULT_REGION`:
+`$AWS_SECRET_ACCESS_KEY`, and the region from `$AWS_DEFAULT_REGION`. If either
+key is empty, setup-aws fails before installing rather than writing an empty
+profile:
 
 ```yaml
 - run:

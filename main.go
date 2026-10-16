@@ -10,6 +10,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/alecthomas/kong"
 
@@ -72,7 +73,27 @@ func (c *cli) Validate() error {
 	if c.RoleARN != "" && c.RoleSessionName == "" {
 		return fmt.Errorf("--role-session-name is required when --role-arn is set")
 	}
+	if c.RoleARN == "" {
+		return c.validateStaticKeys()
+	}
 	return nil
+}
+
+// validateStaticKeys checks both halves of a static access key are set, since
+// the AWS CLI treats a profile with empty keys as a credential source and
+// would fail every call with InvalidClientTokenId.
+func (c *cli) validateStaticKeys() error {
+	var missing []string
+	if c.AWSAccessKeyID == "" {
+		missing = append(missing, "set $AWS_ACCESS_KEY_ID or pass --aws-access-key-id")
+	}
+	if c.AWSSecretAccessKey == "" {
+		missing = append(missing, "set $AWS_SECRET_ACCESS_KEY or pass --aws-secret-access-key")
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	return fmt.Errorf("--configure-credentials needs an access key when --role-arn isn't set: %s", strings.Join(missing, "; "))
 }
 
 func (c *cli) Run(ctx context.Context) error {
