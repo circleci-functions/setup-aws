@@ -129,9 +129,12 @@ func (c *cli) configureCredentials(ctx context.Context) error {
 
 func (c *cli) assumeRole(ctx context.Context) (awsoidc.Credentials, error) {
 	orgID := os.Getenv("CIRCLE_ORGANIZATION_ID")
+	if orgID == "" {
+		return awsoidc.Credentials{}, fmt.Errorf("--role-arn needs $CIRCLE_ORGANIZATION_ID, the audience of the CircleCI OIDC token, and it is empty")
+	}
 	token, err := awsoidc.GetOIDCToken(ctx, orgID)
 	if err != nil {
-		return awsoidc.Credentials{}, fmt.Errorf("get OIDC token: %w", err)
+		return awsoidc.Credentials{}, err
 	}
 
 	sessionName := awsoidc.SanitizeSessionName(c.RoleSessionName)
