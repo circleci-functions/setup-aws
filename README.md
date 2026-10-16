@@ -26,6 +26,11 @@ block waiting for pager input. Pass `--enable-aws-pager` to opt out.
 - run: circleci run setup-aws@<version> -- --version 2.13.0
 ```
 
+On Alpine the official installer can't run (it needs glibc), so setup-aws runs
+`apk add aws-cli` and gets whatever version the package repository has.
+`--version`, `--install-dir`, `--binary-dir` and `--use-brew` are ignored there,
+with a warning when you set them.
+
 On macOS you can install through Homebrew instead of the official installer with
 `--use-brew`.
 
