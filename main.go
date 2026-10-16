@@ -57,6 +57,24 @@ type cli struct {
 	SourceProfile string `name:"source-profile" help:"Source profile for --role-arn. Setting this writes role_arn/source_profile to the profile instead of assuming the role via OIDC."`
 }
 
+// Validate checks flag combinations. Kong runs it before Run, so a bad
+// combination fails before anything is installed or written.
+func (c *cli) Validate() error {
+	if !c.ConfigureCredentials {
+		return nil
+	}
+	if c.SourceProfile != "" {
+		if c.RoleARN == "" {
+			return fmt.Errorf("--role-arn is required when --source-profile is set")
+		}
+		return nil
+	}
+	if c.RoleARN != "" && c.RoleSessionName == "" {
+		return fmt.Errorf("--role-session-name is required when --role-arn is set")
+	}
+	return nil
+}
+
 func (c *cli) Run(ctx context.Context) error {
 	if err := awsinstall.Ensure(ctx, awsinstall.EnsureOptions{
 		Version:           c.Version,
@@ -86,9 +104,6 @@ func (c *cli) configureCredentials(ctx context.Context) error {
 	// profile so the AWS CLI assumes the role itself, rather than assuming it
 	// here via OIDC.
 	if c.SourceProfile != "" {
-		if c.RoleARN == "" {
-			return fmt.Errorf("--role-arn is required when --source-profile is set")
-		}
 		return awsconfigure.ConfigureRoleARN(ctx, c.ProfileName, c.RoleARN, c.SourceProfile)
 	}
 
@@ -99,9 +114,6 @@ func (c *cli) configureCredentials(ctx context.Context) error {
 	var sessionToken string
 
 	if c.RoleARN != "" {
-		if c.RoleSessionName == "" {
-			return fmt.Errorf("--role-session-name is required when --role-arn is set")
-		}
 		creds, err := c.assumeRole(ctx)
 		if err != nil {
 			return err
