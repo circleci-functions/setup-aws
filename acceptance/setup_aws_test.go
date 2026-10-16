@@ -63,6 +63,18 @@ func TestCLI_InvalidFlagsFailBeforeInstall(t *testing.T) {
 			env:  map[string]string{"CIRCLE_JOB": ""},
 			want: "--role-session-name is required when --role-arn is set",
 		},
+		{
+			name: "static keys unset",
+			args: []string{"--configure-credentials", "--region", "us-east-1"},
+			env:  map[string]string{"AWS_ACCESS_KEY_ID": "", "AWS_SECRET_ACCESS_KEY": ""},
+			want: "--configure-credentials needs an access key when --role-arn isn't set: set $AWS_ACCESS_KEY_ID or pass --aws-access-key-id; set $AWS_SECRET_ACCESS_KEY or pass --aws-secret-access-key",
+		},
+		{
+			name: "static secret unset",
+			args: []string{"--configure-credentials", "--aws-access-key-id", "AKIAIOSFODNN7EXAMPLE"},
+			env:  map[string]string{"AWS_ACCESS_KEY_ID": "", "AWS_SECRET_ACCESS_KEY": ""},
+			want: "--configure-credentials needs an access key when --role-arn isn't set: set $AWS_SECRET_ACCESS_KEY or pass --aws-secret-access-key",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
