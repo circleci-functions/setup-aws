@@ -147,18 +147,18 @@ func installLinux(ctx context.Context, opts EnsureOptions) error {
 	url := buildLinuxURL(opts.BaseURL, opts.Version, arch)
 	fmt.Fprintf(os.Stderr, "setup-aws: downloading %s\n", url)
 
-	zipPath, err := downloadFile(ctx, url)
-	if err != nil {
-		return err
-	}
-	defer os.Remove(zipPath)
-
-	extractDir, err := os.MkdirTemp("", "awscli-*")
+	workDir, err := os.MkdirTemp("", "setup-aws-*")
 	if err != nil {
 		return fmt.Errorf("create temp dir: %w", err)
 	}
-	defer os.RemoveAll(extractDir)
+	defer os.RemoveAll(workDir)
 
+	zipPath, err := downloadFile(ctx, workDir, url)
+	if err != nil {
+		return err
+	}
+
+	extractDir := filepath.Join(workDir, "extract")
 	if err := extractZip(zipPath, extractDir); err != nil {
 		return fmt.Errorf("extract: %w", err)
 	}
@@ -178,11 +178,16 @@ func installDarwin(ctx context.Context, opts EnsureOptions) error {
 	url := buildDarwinURL(opts.BaseURL, opts.Version)
 	fmt.Fprintf(os.Stderr, "setup-aws: downloading %s\n", url)
 
-	pkgPath, err := downloadFile(ctx, url)
+	workDir, err := os.MkdirTemp("", "setup-aws-*")
+	if err != nil {
+		return fmt.Errorf("create temp dir: %w", err)
+	}
+	defer os.RemoveAll(workDir)
+
+	pkgPath, err := downloadFile(ctx, workDir, url)
 	if err != nil {
 		return err
 	}
-	defer os.Remove(pkgPath)
 
 	return runWithSudo(ctx, "", "installer", "-pkg", pkgPath, "-target", "/")
 }
@@ -219,8 +224,11 @@ func runWithSudo(ctx context.Context, dir string, args ...string) error {
 	return nil
 }
 
-func downloadFile(ctx context.Context, url string) (string, error) {
-	dldr, err := download.NewDownloader(ctx, 10*time.Minute, os.TempDir())
+// downloadFile downloads url into dir. dir must be a fresh directory created
+// for this run: the downloader reuses any file already at the target path, so a
+// shared directory like os.TempDir() would let another user plant the installer.
+func downloadFile(ctx context.Context, dir, url string) (string, error) {
+	dldr, err := download.NewDownloader(ctx, 10*time.Minute, dir)
 	if err != nil {
 		return "", fmt.Errorf("create downloader: %w", err)
 	}

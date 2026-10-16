@@ -1,7 +1,12 @@
 package awsinstall
 
 import (
+	"archive/zip"
+	"bytes"
+	"context"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -84,6 +89,64 @@ func TestIsInstalled_NoMatch(t *testing.T) {
 	stubDir := writeStubAWS(t, "2.13.0")
 	t.Setenv("PATH", stubDir)
 	assert.Assert(t, !IsInstalled("2.14.0"))
+}
+
+func TestInstallLinux_IgnoresInstallerPlantedInTempDir(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("TMPDIR", tmp)
+	arch := map[string]string{"amd64": "x86_64", "arm64": "aarch64"}[runtime.GOARCH]
+	planted := filepath.Join(tmp, "awscli-exe-linux-"+arch+".zip")
+	assert.NilError(t, os.WriteFile(planted, []byte("planted"), 0600))
+
+	marker := filepath.Join(t.TempDir(), "installed")
+	installer := fmt.Sprintf("#!/bin/sh\necho \"$@\" > %s\n", marker)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(zipWith(t, "aws/install", installer))
+	}))
+	defer srv.Close()
+	t.Setenv("PATH", writeStubSudo(t)+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	err := installLinux(context.Background(), EnsureOptions{
+		Version:    "latest",
+		InstallDir: "/opt/aws-cli",
+		BinaryDir:  "/opt/bin",
+		BaseURL:    srv.URL,
+	})
+	assert.NilError(t, err)
+
+	got, err := os.ReadFile(marker)
+	assert.NilError(t, err, "the downloaded installer should have run")
+	assert.Equal(t, string(got), "-i /opt/aws-cli -b /opt/bin\n")
+
+	entries, err := os.ReadDir(tmp)
+	assert.NilError(t, err)
+	assert.Equal(t, len(entries), 1, "the run's temp dir should be removed")
+	assert.Equal(t, entries[0].Name(), filepath.Base(planted))
+}
+
+// zipWith returns a zip archive holding one executable file.
+func zipWith(t *testing.T, name, content string) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	hdr := &zip.FileHeader{Name: name, Method: zip.Deflate}
+	hdr.SetMode(0o755)
+	w, err := zw.CreateHeader(hdr)
+	assert.NilError(t, err)
+	_, err = w.Write([]byte(content))
+	assert.NilError(t, err)
+	assert.NilError(t, zw.Close())
+	return buf.Bytes()
+}
+
+// writeStubSudo writes a sudo stub that drops its own options and runs the
+// rest of its arguments as the current user, and returns its directory.
+func writeStubSudo(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	script := "#!/bin/sh\nwhile [ \"${1#-}\" != \"$1\" ]; do shift; done\nexec \"$@\"\n"
+	assert.NilError(t, os.WriteFile(filepath.Join(dir, "sudo"), []byte(script), 0750))
+	return dir
 }
 
 // writeOSRelease writes content to a temp file and returns its path.
