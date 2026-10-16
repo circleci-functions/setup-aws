@@ -40,16 +40,23 @@ func Configure(ctx context.Context, opts Options) error {
 		}
 	}
 
-	if opts.Region != "" {
-		if opts.ConfigureDefaultRegion {
-			if err := awsConfigure(ctx, "default.region", opts.Region, ""); err != nil {
-				return err
-			}
+	return ConfigureRegion(ctx, profile, opts.Region, opts.ConfigureDefaultRegion, opts.ConfigureProfileRegion)
+}
+
+// ConfigureRegion writes region to ~/.aws/config as the default region and,
+// separately, as the region of profile. It does nothing when region is empty.
+func ConfigureRegion(ctx context.Context, profile, region string, setDefault, setProfile bool) error {
+	if region == "" {
+		return nil
+	}
+	if setDefault {
+		if err := awsConfigure(ctx, "default.region", region, ""); err != nil {
+			return err
 		}
-		if opts.ConfigureProfileRegion {
-			if err := awsConfigure(ctx, "region", opts.Region, profile); err != nil {
-				return err
-			}
+	}
+	if setProfile {
+		if err := awsConfigure(ctx, "region", region, profile); err != nil {
+			return err
 		}
 	}
 	return nil
