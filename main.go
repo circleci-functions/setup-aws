@@ -25,10 +25,10 @@ type cli struct {
 	// install options
 	Version           string `help:"AWS CLI version to install (e.g. 2.13.0, latest)." default:"latest" example:"2.13.0"`
 	OverrideInstalled bool   `name:"override-installed" help:"Force reinstall even if already installed."`
-	EnableAWSPager    bool   `name:"enable-aws-pager" help:"Skip disabling the AWS CLI output pager."`
-	InstallDir        string `name:"install-dir" help:"Installation directory for the AWS CLI." default:"/usr/local/aws-cli"`
-	BinaryDir         string `name:"binary-dir" help:"Directory for the aws binary symlink." default:"/usr/local/bin"`
-	UseBrew           bool   `name:"use-brew" help:"Install via Homebrew (macOS only)."`
+	EnableAWSPager    bool   `name:"enable-aws-pager" help:"Leave the AWS CLI output pager on instead of disabling it for later steps."`
+	InstallDir        string `name:"install-dir" help:"Installation directory for the AWS CLI. Used by the Linux installer only." default:"/usr/local/aws-cli"`
+	BinaryDir         string `name:"binary-dir" help:"Directory for the aws binary symlink. Used by the Linux installer only." default:"/usr/local/bin"`
+	UseBrew           bool   `name:"use-brew" help:"Install via Homebrew (macOS only). Homebrew installs its current version and ignores --version."`
 	// hidden override for tests
 	BaseURL string `name:"base-url" help:"Override download base URL." hidden:""`
 
@@ -45,7 +45,7 @@ type cli struct {
 	ConfigureProfileRegion bool   `name:"configure-profile-region" help:"Set the region for the named profile." default:"true"`
 
 	// OIDC role assumption (used when --configure-credentials is set)
-	RoleARN         string `name:"role-arn" help:"Role ARN to assume via OIDC. Requires role-session-name."`
+	RoleARN         string `name:"role-arn" help:"Role ARN to assume via OIDC, or to write to the profile with --source-profile."`
 	RoleSessionName string `name:"role-session-name" help:"Session name for the assumed role." env:"CIRCLE_JOB"`
 	SessionDuration int    `name:"session-duration" help:"Session duration in seconds." default:"3600"`
 	SetAWSEnvVars   bool   `name:"set-aws-env-vars" help:"Export assumed-role credentials to $BASH_ENV." default:"true"`
