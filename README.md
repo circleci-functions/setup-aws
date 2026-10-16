@@ -41,6 +41,11 @@ package manager.
 Add `--configure-credentials` to configure AWS credentials after installing.
 Without it, setup-aws only installs the CLI.
 
+The access key, secret and session token are written straight to
+`~/.aws/credentials` (or `$AWS_SHARED_CREDENTIALS_FILE`) at mode 0600, so they
+never appear on a command line. Region and role settings go through
+`aws configure set`.
+
 ### Static access keys
 
 By default the access key and secret are read from `$AWS_ACCESS_KEY_ID` and

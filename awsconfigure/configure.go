@@ -1,4 +1,6 @@
-// Package awsconfigure configures AWS credentials by invoking the aws CLI.
+// Package awsconfigure configures AWS credentials and settings. Secrets are
+// written to the shared credentials file directly; everything else goes
+// through `aws configure set`.
 package awsconfigure
 
 import (
@@ -20,24 +22,24 @@ type Options struct {
 }
 
 // Configure writes credentials to ~/.aws/credentials and region settings to
-// ~/.aws/config for the given profile by calling `aws configure set`.
+// ~/.aws/config for the given profile. The credentials are written by setup-aws
+// itself rather than `aws configure set`, so they never appear in a process's
+// argv, where other users on the host could read them.
 func Configure(ctx context.Context, opts Options) error {
 	profile := opts.Profile
 	if profile == "" {
 		profile = "default"
 	}
 
-	steps := [][]string{
+	creds := []setting{
 		{"aws_access_key_id", opts.AccessKeyID},
 		{"aws_secret_access_key", opts.SecretAccessKey},
 	}
 	if opts.SessionToken != "" {
-		steps = append(steps, []string{"aws_session_token", opts.SessionToken})
+		creds = append(creds, setting{"aws_session_token", opts.SessionToken})
 	}
-	for _, s := range steps {
-		if err := awsConfigure(ctx, s[0], s[1], profile); err != nil {
-			return err
-		}
+	if err := writeCredentials(profile, creds); err != nil {
+		return err
 	}
 
 	if opts.Region != "" {
