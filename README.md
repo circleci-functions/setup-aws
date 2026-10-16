@@ -13,7 +13,8 @@ steps:
 
 Later steps pick up `aws` automatically. The install is skipped when the
 requested version is already present (pass `--override-installed` to force a
-reinstall).
+reinstall). For `latest`, any AWS CLI v2 already on `PATH` counts; a v1 is
+replaced with v2.
 
 By default `AWS_PAGER=""` is appended to `$BASH_ENV` so AWS CLI commands never
 block waiting for pager input. Pass `--enable-aws-pager` to opt out.
