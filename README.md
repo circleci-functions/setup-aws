@@ -21,7 +21,9 @@ block waiting for pager input. Pass `--enable-aws-pager` to opt out.
 
 ## Choosing a version
 
-`--version` takes an exact AWS CLI v2 version or `latest`:
+`--version` takes `latest` or a full AWS CLI v2 version. Anything else, such as
+`2.13`, is rejected before installing. An exact version skips the install only
+when that exact version is already installed:
 
 ```yaml
 - run: circleci run setup-aws@<version> -- --version 2.13.0
