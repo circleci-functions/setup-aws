@@ -157,6 +157,13 @@ func installLinux(ctx context.Context, opts EnsureOptions) error {
 	if err != nil {
 		return err
 	}
+	sigPath, err := downloadFile(ctx, workDir, url+".sig")
+	if err != nil {
+		return err
+	}
+	if err := verifyPGP(zipPath, sigPath); err != nil {
+		return err
+	}
 
 	extractDir := filepath.Join(workDir, "extract")
 	if err := extractZip(zipPath, extractDir); err != nil {
@@ -186,6 +193,9 @@ func installDarwin(ctx context.Context, opts EnsureOptions) error {
 
 	pkgPath, err := downloadFile(ctx, workDir, url)
 	if err != nil {
+		return err
+	}
+	if err := verifyPkg(ctx, pkgPath); err != nil {
 		return err
 	}
 
