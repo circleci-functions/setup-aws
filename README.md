@@ -66,9 +66,11 @@ credentials are also exported to `$BASH_ENV` (turn that off with
 
 ### Profile-based role assumption
 
-Set `--source-profile` to write `role_arn` and `source_profile` into the named
-profile instead of assuming the role here. The AWS CLI then assumes the role
-itself, using the source profile's base credentials, on each call:
+Set `--source-profile` to write `role_arn`, `source_profile` and `--region` into
+the named profile instead of assuming the role here. The AWS CLI then assumes
+the role itself, using the source profile's base credentials, on each call. The
+key, session and `--set-aws-env-vars` flags don't apply in this mode, and
+setup-aws warns if you pass them:
 
 ```yaml
 - run:
@@ -102,9 +104,11 @@ itself, using the source profile's base credentials, on each call:
 | `--role-session-name` | `$CIRCLE_JOB` | Session name for the assumed role |
 | `--session-duration` | `3600` | Session duration in seconds |
 | `--set-aws-env-vars` | true | Export assumed-role credentials to `$BASH_ENV` |
-| `--source-profile` | (empty) | Source profile for `--role-arn`; writes `role_arn`/`source_profile` instead of assuming via OIDC |
+| `--source-profile` | (empty) | Source profile for `--role-arn`; writes `role_arn`/`source_profile`/`region` instead of assuming via OIDC |
 
-Credential flags apply only when `--configure-credentials` is set.
+Credential flags apply only when `--configure-credentials` is set. setup-aws
+warns about any you pass without it. Values that only come from env vars, such
+as `$AWS_DEFAULT_REGION`, don't trigger the warning.
 
 ## Platform support
 
