@@ -160,7 +160,7 @@ func exportCredsToEnv(creds awsoidc.Credentials) error {
 	return appendToBashEnv(bashEnv, fmt.Sprintf(
 		"export AWS_ACCESS_KEY_ID=%s\nexport AWS_SECRET_ACCESS_KEY=%s\nexport AWS_SESSION_TOKEN=%s\n",
 		shellQuote(creds.AccessKeyID), shellQuote(creds.SecretAccessKey), shellQuote(creds.SessionToken),
-	))
+	), true)
 }
 
 const pagerExport = `export AWS_PAGER=""`
@@ -182,13 +182,14 @@ func disableAWSPager() error {
 	if slices.Contains(strings.Split(string(content), "\n"), pagerExport) {
 		return nil
 	}
-	return appendToBashEnv(bashEnv, pagerExport+"\n")
+	return appendToBashEnv(bashEnv, pagerExport+"\n", false)
 }
 
 // appendToBashEnv appends content to the $BASH_ENV file at path. The file can
 // hold credentials and is private to the job, so it's created at mode 0600,
-// and an existing file this user owns is tightened to 0600.
-func appendToBashEnv(path, content string) error {
+// and an existing file this user owns is tightened to 0600. Secret content is
+// not written to a file other users can still read or change.
+func appendToBashEnv(path, content string, secret bool) error {
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600) //nolint:gosec
 	if err != nil {
 		return err
@@ -197,10 +198,30 @@ func appendToBashEnv(path, content string) error {
 	if err := f.Chmod(0o600); err != nil && !errors.Is(err, fs.ErrPermission) {
 		return err
 	}
+	if secret {
+		info, err := f.Stat()
+		if err != nil {
+			return err
+		}
+		if err := checkPrivate(path, info.Mode()); err != nil {
+			return err
+		}
+	}
 	if _, err := f.WriteString(content); err != nil {
 		return err
 	}
 	return f.Close()
+}
+
+// checkPrivate fails for a $BASH_ENV that other users can read or write, which
+// is what is left when the file belongs to another user and so can't be
+// tightened.
+func checkPrivate(path string, mode fs.FileMode) error {
+	if perm := mode.Perm(); perm&0o077 != 0 {
+		return fmt.Errorf("%s has mode %04o and belongs to another user, so other users could read the credentials; "+
+			"point BASH_ENV at a file this user owns, or pass --set-aws-env-vars=false", path, perm)
+	}
+	return nil
 }
 
 // shellQuote single-quotes s for bash, so nothing in it is expanded when

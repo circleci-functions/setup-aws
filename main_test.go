@@ -1,6 +1,8 @@
 package main
 
 import (
+	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -61,6 +63,19 @@ func TestAppendToBashEnv_TightensExistingFile(t *testing.T) {
 	content, err := os.ReadFile(bashEnv)
 	assert.NilError(t, err)
 	assert.Equal(t, string(content), "export FOO=bar\nexport AWS_ACCESS_KEY_ID='a'\nexport AWS_SECRET_ACCESS_KEY='b'\nexport AWS_SESSION_TOKEN='c'\n")
+}
+
+// A $BASH_ENV another user owns can't be tightened, so its mode is what it
+// was. The credentials only go into it when that already keeps other users
+// out.
+func TestCheckPrivate(t *testing.T) {
+	assert.NilError(t, checkPrivate("bash_env", 0o600))
+	assert.NilError(t, checkPrivate("bash_env", 0o400))
+	for _, mode := range []fs.FileMode{0o640, 0o604, 0o620, 0o666} {
+		err := checkPrivate("bash_env", mode)
+		assert.ErrorContains(t, err, fmt.Sprintf("bash_env has mode %04o and belongs to another user", mode))
+		assert.ErrorContains(t, err, "--set-aws-env-vars=false")
+	}
 }
 
 func TestDisableAWSPager_WritesTheLineOnce(t *testing.T) {
