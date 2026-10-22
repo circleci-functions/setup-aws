@@ -14,6 +14,8 @@ import (
 )
 
 func TestConfigure_BasicCredentials(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
 	rec, stubDir := stubAWS(t)
 	t.Setenv("PATH", stubDir+":"+os.Getenv("PATH"))
 
@@ -24,12 +26,17 @@ func TestConfigure_BasicCredentials(t *testing.T) {
 	})
 	assert.NilError(t, err)
 
-	got := readRecord(t, rec)
-	assertContainsSequence(t, got, "configure", "set", "aws_access_key_id", "AKIAIOSFODNN7EXAMPLE", "--profile", "default")
-	assertContainsSequence(t, got, "configure", "set", "aws_secret_access_key", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", "--profile", "default")
+	path := filepath.Join(home, ".aws", "credentials")
+	assert.Equal(t, readFile(t, path), "[default]\n"+
+		"aws_access_key_id = AKIAIOSFODNN7EXAMPLE\n"+
+		"aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY\n")
+	assertMode(t, path, 0o600)
+	assert.Assert(t, !strings.Contains(readRecord(t, rec), "wJalrXUtnFEMI"), "secret must not be passed to aws")
 }
 
 func TestConfigure_WithSessionToken(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
 	rec, stubDir := stubAWS(t)
 	t.Setenv("PATH", stubDir+":"+os.Getenv("PATH"))
 
@@ -41,11 +48,58 @@ func TestConfigure_WithSessionToken(t *testing.T) {
 	})
 	assert.NilError(t, err)
 
+	assert.Equal(t, readFile(t, filepath.Join(home, ".aws", "credentials")), "[myrole]\n"+
+		"aws_access_key_id = ASIA...\n"+
+		"aws_secret_access_key = secret\n"+
+		"aws_session_token = token123\n")
 	got := readRecord(t, rec)
-	assertContainsSequence(t, got, "configure", "set", "aws_session_token", "token123", "--profile", "myrole")
+	assert.Assert(t, !strings.Contains(got, "secret") && !strings.Contains(got, "token123"), "secrets must not be passed to aws, got: %s", got)
+}
+
+func TestConfigure_KeepsOtherProfiles(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	_, stubDir := stubAWS(t)
+	t.Setenv("PATH", stubDir+":"+os.Getenv("PATH"))
+	path := filepath.Join(home, ".aws", "credentials")
+	assert.NilError(t, os.MkdirAll(filepath.Dir(path), 0o700))
+	assert.NilError(t, os.WriteFile(path, []byte("[other]\naws_access_key_id = OTHER\n\n[deploy]\naws_access_key_id = OLD\naws_session_token = keep\n"), 0o644))
+
+	err := awsconfigure.Configure(context.Background(), awsconfigure.Options{
+		Profile:         "deploy",
+		AccessKeyID:     "NEW",
+		SecretAccessKey: "secret",
+	})
+	assert.NilError(t, err)
+
+	assert.Equal(t, readFile(t, path), "[other]\n"+
+		"aws_access_key_id = OTHER\n"+
+		"\n"+
+		"[deploy]\n"+
+		"aws_access_key_id = NEW\n"+
+		"aws_session_token = keep\n"+
+		"aws_secret_access_key = secret\n")
+	assertMode(t, path, 0o600)
+}
+
+func TestConfigure_HonoursSharedCredentialsFile(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	path := filepath.Join(t.TempDir(), "creds")
+	t.Setenv("AWS_SHARED_CREDENTIALS_FILE", path)
+	_, stubDir := stubAWS(t)
+	t.Setenv("PATH", stubDir+":"+os.Getenv("PATH"))
+
+	err := awsconfigure.Configure(context.Background(), awsconfigure.Options{
+		AccessKeyID:     "key",
+		SecretAccessKey: "secret",
+	})
+	assert.NilError(t, err)
+
+	assert.Equal(t, readFile(t, path), "[default]\naws_access_key_id = key\naws_secret_access_key = secret\n")
 }
 
 func TestConfigure_WithRegion(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	rec, stubDir := stubAWS(t)
 	t.Setenv("PATH", stubDir+":"+os.Getenv("PATH"))
 
@@ -65,6 +119,7 @@ func TestConfigure_WithRegion(t *testing.T) {
 }
 
 func TestConfigure_SkipsRegionWhenEmpty(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	rec, stubDir := stubAWS(t)
 	t.Setenv("PATH", stubDir+":"+os.Getenv("PATH"))
 
@@ -118,12 +173,32 @@ echo '---' >> %s
 	return recordFile, dir
 }
 
-// readRecord returns the content of the stub record file.
+// readRecord returns the content of the stub record file, or "" if aws was
+// never called.
 func readRecord(t *testing.T, path string) string {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return ""
+	}
+	assert.NilError(t, err)
+	return string(b)
+}
+
+// readFile returns the content of the file at path.
+func readFile(t *testing.T, path string) string {
 	t.Helper()
 	b, err := os.ReadFile(path)
 	assert.NilError(t, err)
 	return string(b)
+}
+
+// assertMode checks the permission bits of the file at path.
+func assertMode(t *testing.T, path string, want os.FileMode) {
+	t.Helper()
+	info, err := os.Stat(path)
+	assert.NilError(t, err)
+	assert.Equal(t, info.Mode().Perm(), want)
 }
 
 // assertContainsSequence verifies that want appears as a contiguous subsequence
