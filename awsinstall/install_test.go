@@ -80,6 +80,37 @@ func TestIsInstalled_AnyVersion(t *testing.T) {
 	assert.Assert(t, IsInstalled("latest"))
 }
 
+func TestIsInstalled_LatestRejectsV1(t *testing.T) {
+	stubDir := writeStubAWS(t, "1.18.0")
+	t.Setenv("PATH", stubDir)
+	assert.Assert(t, !IsInstalled("latest"))
+}
+
+func TestIsInstalled_LatestRejectsUnrecognisedOutput(t *testing.T) {
+	dir := t.TempDir()
+	assert.NilError(t, os.WriteFile(filepath.Join(dir, "aws"), []byte("#!/bin/sh\necho 'something else'\n"), 0750))
+	t.Setenv("PATH", dir)
+	assert.Assert(t, !IsInstalled("latest"))
+}
+
+func TestInstalledVersion(t *testing.T) {
+	tests := []struct {
+		out, want string
+		ok        bool
+	}{
+		{"aws-cli/2.13.0 Python/3.11.4 Linux/6.1 exe/x86_64.ubuntu.22 prompt/off\n", "2.13.0", true},
+		{"aws-cli/1.18.0 Python/3.8.10 Linux/5.4 botocore/1.17.0\n", "1.18.0", true},
+		{"Python/3.11.4 aws-cli/2.13.0\n", "2.13.0", true},
+		{"", "", false},
+		{"command not found\n", "", false},
+	}
+	for _, tt := range tests {
+		got, ok := installedVersion(tt.out)
+		assert.Equal(t, got, tt.want, "installedVersion(%q)", tt.out)
+		assert.Equal(t, ok, tt.ok, "installedVersion(%q)", tt.out)
+	}
+}
+
 func TestIsInstalled_ExactMatch(t *testing.T) {
 	stubDir := writeStubAWS(t, "2.13.0")
 	t.Setenv("PATH", stubDir)

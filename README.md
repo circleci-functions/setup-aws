@@ -13,7 +13,8 @@ steps:
 
 Later steps pick up `aws` automatically. The install is skipped when the
 requested version is already present (pass `--override-installed` to force a
-reinstall).
+reinstall). For `latest`, any AWS CLI v2 already on `PATH` counts; a v1 is
+replaced with v2.
 
 By default `AWS_PAGER=""` is appended to `$BASH_ENV`, once per job, so AWS CLI
 commands never block waiting for pager input. Pass `--enable-aws-pager` to opt
@@ -21,7 +22,9 @@ out. If `$BASH_ENV` isn't set, setup-aws warns and leaves the pager on.
 
 ## Choosing a version
 
-`--version` takes an exact AWS CLI v2 version or `latest`:
+`--version` takes `latest` or a full AWS CLI v2 version. Anything else, such as
+`2.13`, is rejected before installing. An exact version skips the install only
+when that exact version is already installed:
 
 ```yaml
 - run: circleci run setup-aws@<version> -- --version 2.13.0
