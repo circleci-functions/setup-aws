@@ -56,9 +56,48 @@ type cli struct {
 
 	// Profile-based role assumption (used when --configure-credentials is set).
 	// Setting --source-profile selects this mode: rather than assuming the role
-	// via OIDC, --role-arn and --source-profile are written to the named
-	// profile so the AWS CLI assumes the role itself on each call.
-	SourceProfile string `name:"source-profile" help:"Source profile for --role-arn. Setting this writes role_arn/source_profile to the profile instead of assuming the role via OIDC."`
+	// via OIDC, --role-arn, --source-profile and --region are written to the
+	// named profile so the AWS CLI assumes the role itself on each call.
+	SourceProfile string `name:"source-profile" help:"Source profile for --role-arn. Setting this writes role_arn/source_profile/region to the profile instead of assuming the role via OIDC."`
+}
+
+// Validate checks flag combinations. Kong runs it before Run, so a bad
+// combination fails before anything is installed or written.
+func (c *cli) Validate(kctx *kong.Context) error {
+	c.warnIgnoredFlags(passedFlags(kctx))
+	if !c.ConfigureCredentials {
+		return nil
+	}
+	if c.SourceProfile != "" {
+		if c.RoleARN == "" {
+			return fmt.Errorf("--role-arn is required when --source-profile is set")
+		}
+		return nil
+	}
+	if c.RoleARN != "" && c.RoleSessionName == "" {
+		return fmt.Errorf("--role-session-name is required when --role-arn is set")
+	}
+	if c.RoleARN == "" {
+		return c.validateStaticKeys()
+	}
+	return nil
+}
+
+// validateStaticKeys checks both halves of a static access key are set, since
+// the AWS CLI treats a profile with empty keys as a credential source and
+// would fail every call with InvalidClientTokenId.
+func (c *cli) validateStaticKeys() error {
+	var missing []string
+	if c.AWSAccessKeyID == "" {
+		missing = append(missing, "set $AWS_ACCESS_KEY_ID or pass --aws-access-key-id")
+	}
+	if c.AWSSecretAccessKey == "" {
+		missing = append(missing, "set $AWS_SECRET_ACCESS_KEY or pass --aws-secret-access-key")
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	return fmt.Errorf("--configure-credentials needs an access key when --role-arn isn't set: %s", strings.Join(missing, "; "))
 }
 
 func (c *cli) Run(ctx context.Context) error {
@@ -90,10 +129,10 @@ func (c *cli) configureCredentials(ctx context.Context) error {
 	// profile so the AWS CLI assumes the role itself, rather than assuming it
 	// here via OIDC.
 	if c.SourceProfile != "" {
-		if c.RoleARN == "" {
-			return fmt.Errorf("--role-arn is required when --source-profile is set")
+		if err := awsconfigure.ConfigureRoleARN(ctx, c.ProfileName, c.RoleARN, c.SourceProfile); err != nil {
+			return err
 		}
-		return awsconfigure.ConfigureRoleARN(ctx, c.ProfileName, c.RoleARN, c.SourceProfile)
+		return awsconfigure.ConfigureRegion(ctx, c.ProfileName, c.Region, c.ConfigureDefaultRegion, c.ConfigureProfileRegion)
 	}
 
 	// Resolve the credentials to use for configuration. Static key/secret are
@@ -103,9 +142,6 @@ func (c *cli) configureCredentials(ctx context.Context) error {
 	var sessionToken string
 
 	if c.RoleARN != "" {
-		if c.RoleSessionName == "" {
-			return fmt.Errorf("--role-session-name is required when --role-arn is set")
-		}
 		creds, err := c.assumeRole(ctx)
 		if err != nil {
 			return err
@@ -133,9 +169,12 @@ func (c *cli) configureCredentials(ctx context.Context) error {
 
 func (c *cli) assumeRole(ctx context.Context) (awsoidc.Credentials, error) {
 	orgID := os.Getenv("CIRCLE_ORGANIZATION_ID")
+	if orgID == "" {
+		return awsoidc.Credentials{}, fmt.Errorf("--role-arn needs $CIRCLE_ORGANIZATION_ID, the audience of the CircleCI OIDC token, and it is empty")
+	}
 	token, err := awsoidc.GetOIDCToken(ctx, orgID)
 	if err != nil {
-		return awsoidc.Credentials{}, fmt.Errorf("get OIDC token: %w", err)
+		return awsoidc.Credentials{}, err
 	}
 
 	sessionName := awsoidc.SanitizeSessionName(c.RoleSessionName)
@@ -244,4 +283,59 @@ func run(ctx context.Context, _ *sdk.Client) error {
 	)
 	kCtx.BindTo(ctx, (*context.Context)(nil))
 	return kCtx.Run()
+}
+
+// credentialFlags are the flags that only apply with --configure-credentials.
+var credentialFlags = []string{
+	"profile-name", "aws-access-key-id", "aws-secret-access-key", "region",
+	"configure-default-region", "configure-profile-region", "role-arn",
+	"role-session-name", "session-duration", "set-aws-env-vars", "source-profile",
+}
+
+// sourceProfileIgnoredFlags are the credential flags that --source-profile
+// makes no-ops, since it only writes role_arn, source_profile and region.
+var sourceProfileIgnoredFlags = []string{
+	"aws-access-key-id", "aws-secret-access-key", "role-session-name",
+	"session-duration", "set-aws-env-vars",
+}
+
+// warnIgnoredFlags warns about flags the user passed that this combination
+// ignores. It looks only at flags on the command line: the key, region and
+// session name flags default from env vars a CircleCI job or context commonly
+// sets, and those shouldn't trigger a warning.
+func (c *cli) warnIgnoredFlags(passed map[string]bool) {
+	var ignored []string
+	var reason string
+	switch {
+	case !c.ConfigureCredentials:
+		ignored, reason = filterPassed(credentialFlags, passed), "without --configure-credentials"
+	case c.SourceProfile != "":
+		ignored, reason = filterPassed(sourceProfileIgnoredFlags, passed), "with --source-profile, which only writes role_arn, source_profile and region"
+	}
+	if len(ignored) > 0 {
+		fmt.Fprintf(os.Stderr, "setup-aws: warning: ignoring %s %s\n", strings.Join(ignored, ", "), reason)
+	}
+}
+
+// passedFlags returns the names of the flags given on the command line, as
+// opposed to those filled in from defaults or env vars.
+func passedFlags(kctx *kong.Context) map[string]bool {
+	passed := map[string]bool{}
+	for _, p := range kctx.Path {
+		if p.Flag != nil {
+			passed[p.Flag.Name] = true
+		}
+	}
+	return passed
+}
+
+// filterPassed returns the entries of names that were passed, as flags.
+func filterPassed(names []string, passed map[string]bool) []string {
+	var out []string
+	for _, n := range names {
+		if passed[n] {
+			out = append(out, "--"+n)
+		}
+	}
+	return out
 }

@@ -3,6 +3,7 @@ package awsoidc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -52,7 +53,8 @@ func isAllowedSessionRune(r rune) bool {
 }
 
 // GetOIDCToken mints a CircleCI OIDC token via `circleci run oidc get`.
-// It retries up to 3 times with a 1-second delay between attempts.
+// It retries up to 3 times with a 1-second delay between attempts, unless the
+// circleci CLI is missing, which retrying can't fix.
 func GetOIDCToken(ctx context.Context, orgID string) (string, error) {
 	claims := fmt.Sprintf(`{"aud":%q}`, orgID)
 	var lastErr error
@@ -65,8 +67,11 @@ func GetOIDCToken(ctx context.Context, orgID string) (string, error) {
 			}
 		}
 		out, err := exec.CommandContext(ctx, "circleci", "run", "oidc", "get", "--claims", claims).Output() //nolint:gosec
+		if errors.Is(err, exec.ErrNotFound) {
+			return "", fmt.Errorf("get OIDC token: the circleci CLI is needed to mint the token and isn't on PATH: %w", err)
+		}
 		if err != nil {
-			lastErr = err
+			lastErr = withStderr(err)
 			continue
 		}
 		if token := strings.TrimSpace(string(out)); token != "" {
@@ -75,6 +80,18 @@ func GetOIDCToken(ctx context.Context, orgID string) (string, error) {
 		lastErr = fmt.Errorf("empty token returned")
 	}
 	return "", fmt.Errorf("get OIDC token after 3 attempts: %w", lastErr)
+}
+
+// withStderr adds a failed command's stderr to err, since exec only reports
+// the exit status and the reason is usually in stderr.
+func withStderr(err error) error {
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		if stderr := strings.TrimSpace(string(exitErr.Stderr)); stderr != "" {
+			return fmt.Errorf("%w: %s", err, stderr)
+		}
+	}
+	return err
 }
 
 // stsClient is the subset of sts.Client used by assumeRole. Defined as an

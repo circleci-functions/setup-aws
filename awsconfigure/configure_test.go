@@ -147,6 +147,17 @@ func TestConfigureRoleARN(t *testing.T) {
 	assertContainsSequence(t, got, "configure", "set", "profile.deploy.source_profile", "default")
 }
 
+func TestConfigureRegion_RoleProfile(t *testing.T) {
+	rec, stubDir := stubAWS(t)
+	t.Setenv("PATH", stubDir+":"+os.Getenv("PATH"))
+
+	err := awsconfigure.ConfigureRegion(context.Background(), "deploy", "eu-west-1", false, true)
+	assert.NilError(t, err)
+
+	got := readRecord(t, rec)
+	assert.Equal(t, got, "configure\nset\nregion\neu-west-1\n--profile\ndeploy\n---\n")
+}
+
 // stubAWS creates a stub aws script that records all invocations (one arg per
 // line, invocations separated by "---") to a file. Returns the record file path
 // and the directory containing the stub.

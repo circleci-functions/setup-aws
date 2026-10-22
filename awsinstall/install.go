@@ -21,6 +21,11 @@ import (
 // DefaultBaseURL is the base download URL for AWS CLI installers.
 const DefaultBaseURL = "https://awscli.amazonaws.com"
 
+const (
+	defaultInstallDir = "/usr/local/aws-cli"
+	defaultBinaryDir  = "/usr/local/bin"
+)
+
 const osReleasePath = "/etc/os-release"
 
 type platform int
@@ -123,10 +128,10 @@ func Ensure(ctx context.Context, opts EnsureOptions) error {
 		opts.BaseURL = DefaultBaseURL
 	}
 	if opts.InstallDir == "" {
-		opts.InstallDir = "/usr/local/aws-cli"
+		opts.InstallDir = defaultInstallDir
 	}
 	if opts.BinaryDir == "" {
-		opts.BinaryDir = "/usr/local/bin"
+		opts.BinaryDir = defaultBinaryDir
 	}
 
 	p := detectPlatform(osReleasePath)
@@ -146,6 +151,9 @@ func Ensure(ctx context.Context, opts EnsureOptions) error {
 func installForPlatform(ctx context.Context, p platform, opts EnsureOptions) error {
 	switch p {
 	case platformAlpine:
+		if ignored := alpineIgnoredFlags(opts); len(ignored) > 0 {
+			fmt.Fprintf(os.Stderr, "setup-aws: warning: on Alpine the AWS CLI is installed with apk, which ignores %s\n", strings.Join(ignored, ", "))
+		}
 		return installAlpine(ctx)
 	case platformLinux:
 		return installLinux(ctx, opts)
@@ -154,6 +162,29 @@ func installForPlatform(ctx context.Context, p platform, opts EnsureOptions) err
 	default:
 		return fmt.Errorf("setup-aws: unsupported platform")
 	}
+}
+
+// alpineIgnoredFlags returns the flags set away from their defaults that apk
+// can't honour. The official installer is glibc-only, so apk is the only way to
+// install on musl, and it installs the packaged version where it chooses.
+func alpineIgnoredFlags(opts EnsureOptions) []string {
+	var ignored []string
+	if opts.Version != "latest" {
+		ignored = append(ignored, "--version")
+	}
+	if opts.InstallDir != defaultInstallDir {
+		ignored = append(ignored, "--install-dir")
+	}
+	if opts.BinaryDir != defaultBinaryDir {
+		ignored = append(ignored, "--binary-dir")
+	}
+	if opts.UseBrew {
+		ignored = append(ignored, "--use-brew")
+	}
+	if opts.BaseURL != DefaultBaseURL {
+		ignored = append(ignored, "--base-url")
+	}
+	return ignored
 }
 
 func installAlpine(ctx context.Context) error {
