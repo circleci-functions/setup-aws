@@ -3,12 +3,33 @@
 Installs the AWS CLI v2 for the rest of the job, and — when you ask it to —
 configures AWS credentials in `~/.aws/credentials` and `~/.aws/config`.
 
+Declare the function in a top-level `functions:` block, then call it as a step.
+Each flag in the [table below](#flags) is a `with:` key, written without its
+leading `--`:
+
 ```yaml
-steps:
-  - run:
-      name: Install AWS CLI
-      command: circleci run setup-aws@<version> -- --version 2.13.0
-  - run: aws --version
+functions:
+  setup-aws: github.com/circleci-functions/setup-aws@<version>
+
+jobs:
+  deploy:
+    docker:
+      - image: cimg/base:current
+    steps:
+      - setup-aws:
+          with:
+            version: 2.13.0
+      - run: aws --version
+```
+
+`circleci function add setup-aws` writes the `functions:` entry for you.
+
+Where the `functions:` block isn't enabled, such as on CircleCI Server, run it
+with `circleci run` and the function's full name. Everything after `--` is
+passed to the function:
+
+```yaml
+      - run: circleci run github.com/circleci-functions/setup-aws@<version> -- --version 2.13.0
 ```
 
 Later steps pick up `aws` automatically. The install is skipped when the
@@ -27,7 +48,9 @@ out. If `$BASH_ENV` isn't set, setup-aws warns and leaves the pager on.
 when that exact version is already installed:
 
 ```yaml
-- run: circleci run setup-aws@<version> -- --version 2.13.0
+      - setup-aws:
+          with:
+            version: 2.13.0
 ```
 
 On Alpine the official installer can't run (it needs glibc), so setup-aws runs
@@ -63,10 +86,14 @@ key is empty, setup-aws fails before installing rather than writing an empty
 profile:
 
 ```yaml
-- run:
-    name: Set up AWS
-    command: circleci run setup-aws@<version> -- --configure-credentials --region us-east-1
+      - setup-aws:
+          with:
+            configure-credentials: true
+            region: us-east-1
 ```
+
+Static keys are only written to `~/.aws/credentials`. Unlike assumed-role
+credentials, they aren't exported to `$BASH_ENV`.
 
 ### OIDC role assumption
 
@@ -77,14 +104,20 @@ credentials are also exported to `$BASH_ENV` (turn that off with
 than leaving later steps without them:
 
 ```yaml
-- run:
-    name: Assume role via OIDC
-    command: >-
-      circleci run setup-aws@<version> --
-      --configure-credentials
-      --role-arn arn:aws:iam::123456789012:role/Deploy
-      --region us-east-1
+      - setup-aws:
+          with:
+            configure-credentials: true
+            role-arn: arn:aws:iam::123456789012:role/Deploy
+            region: us-east-1
 ```
+
+Before this works, AWS needs to trust CircleCI's tokens. Create an IAM OIDC
+identity provider for `https://oidc.circleci.com/org/<organization-id>` with
+your organization ID as the audience, and give the role a trust policy that
+lets that provider call `sts:AssumeRoleWithWebIdentity`. setup-aws mints the
+token with the `circleci` CLI, which every job has, and uses
+`$CIRCLE_ORGANIZATION_ID` as the audience. See
+[Using OpenID Connect tokens in jobs](https://circleci.com/docs/guides/permissions-authentication/openid-connect-tokens/).
 
 `--role-session-name` defaults to `$CIRCLE_JOB`.
 
@@ -102,15 +135,17 @@ key, session and `--set-aws-env-vars` flags don't apply in this mode, and
 setup-aws warns if you pass them:
 
 ```yaml
-- run:
-    name: Configure deploy profile
-    command: >-
-      circleci run setup-aws@<version> --
-      --configure-credentials
-      --profile-name deploy
-      --role-arn arn:aws:iam::123456789012:role/Deploy
-      --source-profile default
+      - setup-aws:
+          with:
+            configure-credentials: true
+            profile-name: deploy
+            role-arn: arn:aws:iam::123456789012:role/Deploy
+            source-profile: default
 ```
+
+setup-aws doesn't create the source profile. It must already hold
+credentials, for example from an earlier setup-aws step that configured static
+keys.
 
 ## Flags
 
@@ -118,10 +153,10 @@ setup-aws warns if you pass them:
 |------|---------|-------------|
 | `--version` | `latest` | AWS CLI version to install (e.g. `2.13.0`, `latest`) |
 | `--override-installed` | false | Force reinstall even if already installed |
-| `--enable-aws-pager` | false | Skip disabling the AWS CLI output pager |
-| `--install-dir` | `/usr/local/aws-cli` | Installation directory |
-| `--binary-dir` | `/usr/local/bin` | Directory for the `aws` symlink |
-| `--use-brew` | false | Install via Homebrew (macOS only) |
+| `--enable-aws-pager` | false | Leave the AWS CLI output pager on instead of disabling it |
+| `--install-dir` | `/usr/local/aws-cli` | Installation directory. Linux installer only; the macOS package always installs here |
+| `--binary-dir` | `/usr/local/bin` | Directory for the `aws` symlink. Linux installer only; the macOS package always links here |
+| `--use-brew` | false | Install via Homebrew (macOS only). Homebrew installs its current version and ignores `--version` |
 | `--configure-credentials` | false | Configure credentials after installing |
 | `--profile-name` | `default` | AWS credentials profile to configure |
 | `--aws-access-key-id` | `$AWS_ACCESS_KEY_ID` | AWS access key ID |
