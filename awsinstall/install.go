@@ -147,18 +147,25 @@ func installLinux(ctx context.Context, opts EnsureOptions) error {
 	url := buildLinuxURL(opts.BaseURL, opts.Version, arch)
 	fmt.Fprintf(os.Stderr, "setup-aws: downloading %s\n", url)
 
-	zipPath, err := downloadFile(ctx, url)
-	if err != nil {
-		return err
-	}
-	defer os.Remove(zipPath)
-
-	extractDir, err := os.MkdirTemp("", "awscli-*")
+	workDir, err := os.MkdirTemp("", "setup-aws-*")
 	if err != nil {
 		return fmt.Errorf("create temp dir: %w", err)
 	}
-	defer os.RemoveAll(extractDir)
+	defer os.RemoveAll(workDir)
 
+	zipPath, err := downloadFile(ctx, workDir, url)
+	if err != nil {
+		return err
+	}
+	sigPath, err := downloadFile(ctx, workDir, url+".sig")
+	if err != nil {
+		return err
+	}
+	if err := verifyPGP(zipPath, sigPath); err != nil {
+		return err
+	}
+
+	extractDir := filepath.Join(workDir, "extract")
 	if err := extractZip(zipPath, extractDir); err != nil {
 		return fmt.Errorf("extract: %w", err)
 	}
@@ -178,11 +185,19 @@ func installDarwin(ctx context.Context, opts EnsureOptions) error {
 	url := buildDarwinURL(opts.BaseURL, opts.Version)
 	fmt.Fprintf(os.Stderr, "setup-aws: downloading %s\n", url)
 
-	pkgPath, err := downloadFile(ctx, url)
+	workDir, err := os.MkdirTemp("", "setup-aws-*")
+	if err != nil {
+		return fmt.Errorf("create temp dir: %w", err)
+	}
+	defer os.RemoveAll(workDir)
+
+	pkgPath, err := downloadFile(ctx, workDir, url)
 	if err != nil {
 		return err
 	}
-	defer os.Remove(pkgPath)
+	if err := verifyPkg(ctx, pkgPath); err != nil {
+		return err
+	}
 
 	return runWithSudo(ctx, "", "installer", "-pkg", pkgPath, "-target", "/")
 }
@@ -202,14 +217,35 @@ func installDarwinBrew(ctx context.Context, override bool) error {
 	return nil
 }
 
-// runWithSudo runs args as the current user; prepends sudo when not root.
-func runWithSudo(ctx context.Context, dir string, args ...string) error {
-	var cmd *exec.Cmd
-	if os.Geteuid() != 0 {
-		cmd = exec.CommandContext(ctx, "sudo", args...) //nolint:gosec
-	} else {
-		cmd = exec.CommandContext(ctx, args[0], args[1:]...) //nolint:gosec
+// checkSudo fails with a clear message when sudo is missing or wants a
+// password, before the install starts.
+func checkSudo(ctx context.Context) error {
+	const msg = "installing the AWS CLI needs root or passwordless sudo"
+	if _, err := exec.LookPath("sudo"); err != nil {
+		return fmt.Errorf("%s, and sudo is not installed", msg)
 	}
+	out, err := exec.CommandContext(ctx, "sudo", "-n", "true").CombinedOutput()
+	if err != nil {
+		if detail := strings.TrimSpace(string(out)); detail != "" {
+			return fmt.Errorf("%s: %s", msg, detail)
+		}
+		return fmt.Errorf("%s: sudo -n: %w", msg, err)
+	}
+	return nil
+}
+
+// runWithSudo runs args as root: directly when already root, otherwise through
+// non-interactive sudo, since a CI step has no terminal to answer a password
+// prompt and would hang instead.
+func runWithSudo(ctx context.Context, dir string, args ...string) error {
+	name, cmdArgs := args[0], args[1:]
+	if os.Geteuid() != 0 {
+		if err := checkSudo(ctx); err != nil {
+			return err
+		}
+		name, cmdArgs = "sudo", append([]string{"-n"}, args...)
+	}
+	cmd := exec.CommandContext(ctx, name, cmdArgs...) //nolint:gosec
 	cmd.Dir = dir
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
@@ -219,8 +255,11 @@ func runWithSudo(ctx context.Context, dir string, args ...string) error {
 	return nil
 }
 
-func downloadFile(ctx context.Context, url string) (string, error) {
-	dldr, err := download.NewDownloader(ctx, 10*time.Minute, os.TempDir())
+// downloadFile downloads url into dir. dir must be a fresh directory created
+// for this run: the downloader reuses any file already at the target path, so a
+// shared directory like os.TempDir() would let another user plant the installer.
+func downloadFile(ctx context.Context, dir, url string) (string, error) {
+	dldr, err := download.NewDownloader(ctx, 10*time.Minute, dir)
 	if err != nil {
 		return "", fmt.Errorf("create downloader: %w", err)
 	}

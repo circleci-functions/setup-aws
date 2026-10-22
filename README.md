@@ -15,8 +15,9 @@ Later steps pick up `aws` automatically. The install is skipped when the
 requested version is already present (pass `--override-installed` to force a
 reinstall).
 
-By default `AWS_PAGER=""` is appended to `$BASH_ENV` so AWS CLI commands never
-block waiting for pager input. Pass `--enable-aws-pager` to opt out.
+By default `AWS_PAGER=""` is appended to `$BASH_ENV`, once per job, so AWS CLI
+commands never block waiting for pager input. Pass `--enable-aws-pager` to opt
+out. If `$BASH_ENV` isn't set, setup-aws warns and leaves the pager on.
 
 ## Choosing a version
 
@@ -29,10 +30,22 @@ block waiting for pager input. Pass `--enable-aws-pager` to opt out.
 On macOS you can install through Homebrew instead of the official installer with
 `--use-brew`.
 
+The official installers are verified before they run. On Linux, the zip's PGP
+signature must match the AWS CLI team key published in the
+[AWS CLI install guide](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html).
+On macOS, `pkgutil --check-signature` must show the package signed by Amazon's
+Apple Developer ID. Alpine (`apk`) and `--use-brew` installs are left to the
+package manager.
+
 ## Configuring credentials
 
 Add `--configure-credentials` to configure AWS credentials after installing.
 Without it, setup-aws only installs the CLI.
+
+The access key, secret and session token are written straight to
+`~/.aws/credentials` (or `$AWS_SHARED_CREDENTIALS_FILE`) at mode 0600, so they
+never appear on a command line. Region and role settings go through
+`aws configure set`.
 
 ### Static access keys
 
@@ -50,7 +63,8 @@ By default the access key and secret are read from `$AWS_ACCESS_KEY_ID` and
 Set `--role-arn` to mint a CircleCI OIDC token and call
 `sts:AssumeRoleWithWebIdentity` for temporary credentials. The assumed-role
 credentials are also exported to `$BASH_ENV` (turn that off with
-`--set-aws-env-vars=false`):
+`--set-aws-env-vars=false`). setup-aws fails if `$BASH_ENV` isn't set, rather
+than leaving later steps without them:
 
 ```yaml
 - run:
@@ -63,6 +77,11 @@ credentials are also exported to `$BASH_ENV` (turn that off with
 ```
 
 `--role-session-name` defaults to `$CIRCLE_JOB`.
+
+The exported credentials are plain text in `$BASH_ENV`, which setup-aws keeps
+at mode 0600. CircleCI only masks project and context secrets, not values
+minted during the job, so a later `env` or `set -x` prints them. Pass
+`--set-aws-env-vars=false` if later steps only need `~/.aws/credentials`.
 
 ### Profile-based role assumption
 
@@ -109,3 +128,7 @@ Credential flags apply only when `--configure-credentials` is set.
 ## Platform support
 
 Linux (amd64, arm64), Alpine Linux, and macOS. Windows is not yet supported.
+
+On Linux and macOS the official installer runs as root. When the step isn't
+already root, setup-aws uses `sudo -n` and fails if sudo is missing or asks for
+a password. `--use-brew` on macOS doesn't need root.
