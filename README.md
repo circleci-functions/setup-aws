@@ -178,6 +178,13 @@ as `$AWS_DEFAULT_REGION`, don't trigger the warning.
 
 Linux (amd64, arm64), Alpine Linux, and macOS. Windows is not yet supported.
 
-On Linux and macOS the official installer runs as root. When the step isn't
-already root, setup-aws uses `sudo -n` and fails if sudo is missing or asks for
-a password. `--use-brew` on macOS doesn't need root.
+On Linux the official installer runs as the step's user when it can write to
+`--install-dir` and `--binary-dir`, and through `sudo -n` otherwise. Without
+root or passwordless sudo, the default directories give way to
+`~/.local/aws-cli` and `~/.local/bin`; directories you choose don't, and the
+step fails. When `--binary-dir` isn't on `PATH`, setup-aws puts it there for
+later steps.
+
+On macOS the package installer runs as root, through `sudo -n` when the step
+isn't root, and fails if sudo is missing or asks for a password. `--use-brew`
+doesn't need root.

@@ -10,12 +10,14 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 
-	"github.com/circleci-functions/toolkit/download"
-
 	"github.com/circleci-functions/toolkit/archive"
+	"github.com/circleci-functions/toolkit/bashenv"
+	"github.com/circleci-functions/toolkit/download"
+	"github.com/circleci-functions/toolkit/pathlink"
 )
 
 // DefaultBaseURL is the base download URL for AWS CLI installers.
@@ -198,6 +200,11 @@ func installAlpine(ctx context.Context) error {
 }
 
 func installLinux(ctx context.Context, opts EnsureOptions) error {
+	elevate, err := chooseLinuxDirs(ctx, &opts)
+	if err != nil {
+		return err
+	}
+
 	arch := runtime.GOARCH
 	switch arch {
 	case "amd64":
@@ -236,7 +243,47 @@ func installLinux(ctx context.Context, opts EnsureOptions) error {
 	if opts.OverrideInstalled {
 		args = append(args, "--update")
 	}
-	return runWithSudo(ctx, extractDir, args...)
+	if err := run(ctx, extractDir, elevate, args...); err != nil {
+		return err
+	}
+	return ensureOnPath(opts.BinaryDir)
+}
+
+// chooseLinuxDirs reports whether installing into opts' directories needs
+// sudo. When it would and sudo can't be used, it moves the default directories
+// to ~/.local/aws-cli and ~/.local/bin instead.
+func chooseLinuxDirs(ctx context.Context, opts *EnsureOptions) (elevate bool, err error) {
+	if os.Geteuid() == 0 || (pathlink.Writable(opts.InstallDir) && pathlink.Writable(opts.BinaryDir)) {
+		return false, nil
+	}
+	sudoErr := checkSudo(ctx)
+	if sudoErr == nil {
+		return true, nil
+	}
+	if opts.InstallDir != defaultInstallDir || opts.BinaryDir != defaultBinaryDir {
+		return false, sudoErr
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return false, sudoErr
+	}
+	opts.InstallDir = filepath.Join(home, ".local", "aws-cli")
+	opts.BinaryDir = filepath.Join(home, ".local", "bin")
+	fmt.Fprintf(os.Stderr, "setup-aws: no root or passwordless sudo to install into %s; installing into %s instead\n", defaultInstallDir, opts.InstallDir)
+	return false, nil
+}
+
+// ensureOnPath puts dir on PATH for the rest of this step and, through
+// $BASH_ENV, for later steps, unless it is there already.
+func ensureOnPath(dir string) error {
+	path := os.Getenv("PATH")
+	if slices.Contains(pathlink.SearchDirs(path), dir) {
+		return nil
+	}
+	if err := bashenv.AddToPath(dir); err != nil {
+		return fmt.Errorf("put %s on PATH for later steps: %w", dir, err)
+	}
+	return os.Setenv("PATH", dir+string(os.PathListSeparator)+path)
 }
 
 func installDarwin(ctx context.Context, opts EnsureOptions) error {
@@ -261,7 +308,7 @@ func installDarwin(ctx context.Context, opts EnsureOptions) error {
 		return err
 	}
 
-	return runWithSudo(ctx, "", "installer", "-pkg", pkgPath, "-target", "/")
+	return runWithSudo(ctx, "installer", "-pkg", pkgPath, "-target", "/")
 }
 
 func installDarwinBrew(ctx context.Context, override bool) error {
@@ -299,12 +346,21 @@ func checkSudo(ctx context.Context) error {
 // runWithSudo runs args as root: directly when already root, otherwise through
 // non-interactive sudo, since a CI step has no terminal to answer a password
 // prompt and would hang instead.
-func runWithSudo(ctx context.Context, dir string, args ...string) error {
-	name, cmdArgs := args[0], args[1:]
-	if os.Geteuid() != 0 {
+func runWithSudo(ctx context.Context, args ...string) error {
+	root := os.Geteuid() == 0
+	if !root {
 		if err := checkSudo(ctx); err != nil {
 			return err
 		}
+	}
+	return run(ctx, "", !root, args...)
+}
+
+// run runs args in dir, through sudo -n when sudo is set, sending their output
+// to stderr.
+func run(ctx context.Context, dir string, sudo bool, args ...string) error {
+	name, cmdArgs := args[0], args[1:]
+	if sudo {
 		name, cmdArgs = "sudo", append([]string{"-n"}, args...)
 	}
 	cmd := exec.CommandContext(ctx, name, cmdArgs...) //nolint:gosec
