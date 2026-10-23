@@ -13,7 +13,6 @@ jobs:
     executor: go
     steps:
       - checkout
-      - toolkit/private-mod-init
       - restore_cache:
           keys:
             - setup-aws-go-{{ checksum "go.sum" }}-
@@ -31,7 +30,6 @@ jobs:
     executor: go
     steps:
       - checkout
-      - toolkit/private-mod-init
       - restore_cache:
           keys:
             - setup-aws-go-{{ checksum "go.sum" }}-
@@ -45,10 +43,8 @@ jobs:
 workflows:
   test-publish:
     jobs:
-      - test:
-          context: [github-readonly]
-      - build:
-          context: [github-readonly]
+      - test
+      - build
       - toolkit/release-pr:
           name: release-pr
           executor: go
