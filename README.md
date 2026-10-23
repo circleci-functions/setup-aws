@@ -56,7 +56,9 @@ when that exact version is already installed:
 On Alpine the official installer can't run (it needs glibc), so setup-aws runs
 `apk add aws-cli` and gets whatever version the package repository has.
 `--version`, `--install-dir`, `--binary-dir` and `--use-brew` are ignored there,
-with a warning when you set them.
+with a warning when you set them. On `python:*-alpine` images, whose own
+libpython can stop that package's `aws` from starting, setup-aws adds an `aws`
+to `/usr/local/bin` that runs it with Alpine's libpython instead.
 
 On macOS you can install through Homebrew instead of the official installer with
 `--use-brew`.
