@@ -156,7 +156,7 @@ func installForPlatform(ctx context.Context, p platform, opts EnsureOptions) err
 		if ignored := alpineIgnoredFlags(opts); len(ignored) > 0 {
 			fmt.Fprintf(os.Stderr, "setup-aws: warning: on Alpine the AWS CLI is installed with apk, which ignores %s\n", strings.Join(ignored, ", "))
 		}
-		return installAlpine(ctx)
+		return installAlpine(ctx, defaultBinaryDir)
 	case platformLinux:
 		return installLinux(ctx, opts)
 	case platformDarwin:
@@ -189,13 +189,41 @@ func alpineIgnoredFlags(opts EnsureOptions) []string {
 	return ignored
 }
 
-func installAlpine(ctx context.Context) error {
+// installAlpine installs the AWS CLI with apk. If it then fails to start, it
+// puts a wrapper in wrapperDir that runs it against Alpine's own libpython:
+// python:*-alpine images put theirs in /usr/local/lib, where it is found first,
+// and the aws-cli package can crash against an older one.
+func installAlpine(ctx context.Context, wrapperDir string) error {
 	cmd := exec.CommandContext(ctx, "apk", "add", "--no-cache", "aws-cli")
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("apk add aws-cli: %w", err)
 	}
+
+	aws, err := exec.LookPath("aws")
+	if err != nil {
+		return fmt.Errorf("apk add aws-cli put no aws on PATH: %w", err)
+	}
+	out, err := exec.CommandContext(ctx, aws, "--version").CombinedOutput() //nolint:gosec
+	if err == nil {
+		return nil
+	}
+	failed := fmt.Errorf("aws --version failed after apk add aws-cli: %s", strings.TrimSpace(string(out)))
+
+	wrapper := filepath.Join(wrapperDir, "aws")
+	if aws == wrapper {
+		return failed
+	}
+	script := fmt.Sprintf("#!/bin/sh\nLD_LIBRARY_PATH=/usr/lib exec '%s' \"$@\"\n", aws)
+	if err := os.WriteFile(wrapper, []byte(script), 0o755); err != nil { //nolint:gosec // an executable on PATH
+		return failed
+	}
+	if exec.CommandContext(ctx, "aws", "--version").Run() != nil {
+		_ = os.Remove(wrapper)
+		return failed
+	}
+	fmt.Fprintf(os.Stderr, "setup-aws: %s fails to start with this image's libpython, so %s runs it with Alpine's\n", aws, wrapper)
 	return nil
 }
 
