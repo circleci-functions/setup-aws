@@ -14,6 +14,8 @@ import (
 	"testing"
 
 	"gotest.tools/v3/assert"
+
+	"github.com/circleci-functions/toolkit/pathlink"
 )
 
 func TestDetectPlatform_Alpine(t *testing.T) {
@@ -135,6 +137,7 @@ func TestInstallLinux_IgnoresInstallerPlantedInTempDir(t *testing.T) {
 	key := useTestSigningKey(t)
 	srv := serveInstaller(t, installer, detachSign(t, key, installer))
 	t.Setenv("PATH", writeStubSudo(t)+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("BASH_ENV", filepath.Join(t.TempDir(), "bash_env"))
 
 	err := installLinux(context.Background(), EnsureOptions{
 		Version:    "latest",
@@ -152,6 +155,51 @@ func TestInstallLinux_IgnoresInstallerPlantedInTempDir(t *testing.T) {
 	assert.NilError(t, err)
 	assert.Equal(t, len(entries), 1, "the run's temp dir should be removed")
 	assert.Equal(t, entries[0].Name(), filepath.Base(planted))
+}
+
+func TestInstallLinux_WritableDirsSkipSudo(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	bashEnv := filepath.Join(t.TempDir(), "bash_env")
+	t.Setenv("BASH_ENV", bashEnv)
+	dir := t.TempDir()
+	installDir, binaryDir := filepath.Join(dir, "aws-cli"), filepath.Join(dir, "bin")
+
+	got, err := runFakeInstaller(t, EnsureOptions{InstallDir: installDir, BinaryDir: binaryDir})
+	assert.NilError(t, err)
+	assert.Equal(t, got, "-i "+installDir+" -b "+binaryDir+"\n")
+
+	assert.Assert(t, strings.HasPrefix(os.Getenv("PATH"), binaryDir+string(os.PathListSeparator)))
+	exported, err := os.ReadFile(bashEnv)
+	assert.NilError(t, err)
+	assert.Assert(t, strings.Contains(string(exported), binaryDir), "BASH_ENV: %s", exported)
+}
+
+func TestInstallLinux_FallsBackToHomeWithoutSudo(t *testing.T) {
+	if os.Geteuid() == 0 || (pathlink.Writable(defaultInstallDir) && pathlink.Writable(defaultBinaryDir)) {
+		t.Skip("the default directories need no sudo here")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", t.TempDir())
+	t.Setenv("BASH_ENV", filepath.Join(t.TempDir(), "bash_env"))
+
+	got, err := runFakeInstaller(t, EnsureOptions{InstallDir: defaultInstallDir, BinaryDir: defaultBinaryDir})
+	assert.NilError(t, err)
+	assert.Equal(t, got, "-i "+filepath.Join(home, ".local", "aws-cli")+" -b "+filepath.Join(home, ".local", "bin")+"\n")
+}
+
+func TestInstallLinux_ChosenDirsNeedSudo(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root can write to a read-only directory")
+	}
+	t.Setenv("PATH", t.TempDir())
+	readOnly := t.TempDir()
+	assert.NilError(t, os.Chmod(readOnly, 0500))       //nolint:gosec // a directory needs its execute bit to be searched
+	t.Cleanup(func() { _ = os.Chmod(readOnly, 0700) }) //nolint:gosec // writable again, so the temp dir can be removed
+
+	got, err := runFakeInstaller(t, EnsureOptions{InstallDir: filepath.Join(readOnly, "aws-cli"), BinaryDir: filepath.Join(readOnly, "bin")})
+	assert.Error(t, err, "installing the AWS CLI needs root or passwordless sudo, and sudo is not installed")
+	assert.Equal(t, got, "", "the installer should not run")
 }
 
 func TestInstallLinux_RejectsBadSignature(t *testing.T) {
@@ -183,6 +231,26 @@ func TestInstallDarwin_RejectsUnsignedPackage(t *testing.T) {
 
 	_, statErr := os.Stat(marker)
 	assert.Assert(t, os.IsNotExist(statErr), "the installer should not run")
+}
+
+// runFakeInstaller runs installLinux against an installer that records its
+// arguments, and returns them, or "" if it didn't run.
+func runFakeInstaller(t *testing.T, opts EnsureOptions) (string, error) {
+	t.Helper()
+	t.Setenv("TMPDIR", t.TempDir())
+	marker := filepath.Join(t.TempDir(), "installed")
+	installer := zipWith(t, "aws/install", fmt.Sprintf("#!/bin/sh\necho \"$@\" > %s\n", marker))
+	srv := serveInstaller(t, installer, detachSign(t, useTestSigningKey(t), installer))
+
+	opts.Version = "latest"
+	opts.BaseURL = srv.URL
+	err := installLinux(context.Background(), opts)
+	got, readErr := os.ReadFile(marker)
+	if os.IsNotExist(readErr) {
+		return "", err
+	}
+	assert.NilError(t, readErr)
+	return string(got), err
 }
 
 // serveInstaller serves sig for paths ending in .sig and installer for

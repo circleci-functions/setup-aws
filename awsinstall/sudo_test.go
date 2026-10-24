@@ -20,7 +20,7 @@ func TestRunWithSudo_NonInteractive(t *testing.T) {
 	assert.NilError(t, os.WriteFile(filepath.Join(dir, "sudo"), []byte(script), 0750))
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	err := runWithSudo(context.Background(), "", "installer", "-pkg", "AWSCLIV2.pkg", "-target", "/")
+	err := runWithSudo(context.Background(), "installer", "-pkg", "AWSCLIV2.pkg", "-target", "/")
 	assert.NilError(t, err)
 
 	got, err := os.ReadFile(record)
@@ -38,7 +38,7 @@ func TestRunWithSudo_PasswordRequired(t *testing.T) {
 	assert.NilError(t, os.WriteFile(filepath.Join(dir, "sudo"), []byte(script), 0750))
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	err := runWithSudo(context.Background(), "", "installer", "-pkg", "AWSCLIV2.pkg", "-target", "/")
+	err := runWithSudo(context.Background(), "installer", "-pkg", "AWSCLIV2.pkg", "-target", "/")
 	assert.Error(t, err, "installing the AWS CLI needs root or passwordless sudo: sudo: a password is required")
 	_, statErr := os.Stat(marker)
 	assert.Assert(t, os.IsNotExist(statErr), "the installer should not run")
@@ -50,6 +50,6 @@ func TestRunWithSudo_SudoMissing(t *testing.T) {
 	}
 	t.Setenv("PATH", t.TempDir())
 
-	err := runWithSudo(context.Background(), "", "installer", "-pkg", "AWSCLIV2.pkg", "-target", "/")
+	err := runWithSudo(context.Background(), "installer", "-pkg", "AWSCLIV2.pkg", "-target", "/")
 	assert.Error(t, err, "installing the AWS CLI needs root or passwordless sudo, and sudo is not installed")
 }
