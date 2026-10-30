@@ -7,7 +7,7 @@ require (
 	github.com/alecthomas/kong v1.15.0
 	github.com/aws/aws-sdk-go-v2/config v1.32.25
 	github.com/aws/aws-sdk-go-v2/service/sts v1.43.3
-	github.com/circleci-functions/toolkit v0.3.0
+	github.com/circleci-functions/toolkit v0.4.0
 	gotest.tools/v3 v3.5.2
 )
 
