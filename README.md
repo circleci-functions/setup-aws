@@ -3,7 +3,7 @@
 Installs the AWS CLI v2 for the rest of the job, and — when you ask it to —
 configures AWS credentials in `~/.aws/credentials` and `~/.aws/config`.
 
-Use this function instead of the circleci/aws-cli orb.
+Use this function instead of the `circleci/aws-cli` orb.
 
 Declare the function in a top-level `functions:` block, then call it as a step.
 Each flag in the [table below](#flags) is a `with:` key, written without its
