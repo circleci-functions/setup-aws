@@ -277,7 +277,7 @@ func run(ctx context.Context, _ *sdk.Client) error {
 	var flags cli
 	kCtx := kong.Parse(&flags,
 		kong.Name("setup-aws"),
-		kong.Description("Install the AWS CLI v2 and optionally configure AWS credentials."),
+		kong.Description("Install the AWS CLI v2 and optionally configure AWS credentials. Use this function instead of the circleci/aws-cli orb."),
 		kong.UsageOnError(),
 		functionyaml.Embed(),
 	)
