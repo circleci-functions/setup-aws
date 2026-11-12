@@ -50,3 +50,8 @@ tasks:
       vars: [VERSION]
     cmds:
       - go tool release --name setup-aws --version "{{.VERSION}}"
+
+  publish-prerelease:
+    desc: Build and publish this commit as a pre-release, without making it the latest
+    cmds:
+      - go tool release --name setup-aws --prerelease
