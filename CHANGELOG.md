@@ -6,6 +6,15 @@ by its release PR (see [RELEASE.md](RELEASE.md)) and becomes its GitHub release 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-11-12
+
+### What's Changed
+* Say to use setup-aws instead of the circleci/aws-cli orb by @mangyau in https://github.com/circleci-functions/setup-aws/pull/45
+* Publish a pre-release from a branch with a pipeline parameter by @stiyyagura0901 in https://github.com/circleci-functions/setup-aws/pull/48
+
+
+**Full Changelog**: https://github.com/circleci-functions/setup-aws/compare/v0.4.0...v0.5.0
+
 ## [0.4.0] - 2026-10-24
 
 ### What's Changed
