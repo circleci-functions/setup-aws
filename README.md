@@ -26,14 +26,6 @@ jobs:
 
 `circleci function add setup-aws` writes the `functions:` entry for you.
 
-Where the `functions:` block isn't enabled, such as on CircleCI Server, run it
-with `circleci run` and the function's full name. Everything after `--` is
-passed to the function:
-
-```yaml
-      - run: circleci run github.com/circleci-functions/setup-aws@<version> -- --version 2.13.0
-```
-
 Later steps pick up `aws` automatically. The install is skipped when the
 requested version is already present (pass `--override-installed` to force a
 reinstall). For `latest`, any AWS CLI v2 already on `PATH` counts; a v1 is
